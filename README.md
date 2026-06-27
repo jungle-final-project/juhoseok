@@ -1,6 +1,18 @@
 # BuildGraph AI 프로토타입
 
-정글 최종 프로젝트용 BuildGraph AI 프로토타입 모노레포입니다.
+정글 최종 프로젝트 `나만의 무기 만들기`용 프로토타입 저장소입니다. 목표는 완성 서비스가 아니라, 5명이 각자 담당 기능을 바로 구현할 수 있는 공통 화면/API/인프라 출발점을 제공하는 것입니다.
+
+## 먼저 읽을 문서
+
+| 순서 | 문서 | 목적 |
+| --- | --- | --- |
+| 1 | [docs/role-workspaces.md](docs/role-workspaces.md) | 자기 담당 범위, 파일 소유권, PR 규칙 확인 |
+| 2 | [docs/sprint-1-start-checklist.md](docs/sprint-1-start-checklist.md) | 첫 PR에서 무엇을 할지 확인 |
+| 3 | [docs/architecture.md](docs/architecture.md) | 전체 구조와 런타임 흐름 확인 |
+| 4 | [docs/scaffold-decisions.md](docs/scaffold-decisions.md) | 이번 프로토타입에서 고정한 결정사항과 제외 범위 확인 |
+| 5 | [docs/openapi.yaml](docs/openapi.yaml) | API 요청/응답 계약 확인 |
+
+4번 담당자는 [apps/pc-agent/README.md](apps/pc-agent/README.md)도 함께 확인합니다.
 
 ## 기술 스택
 
@@ -12,15 +24,60 @@
 ## 빠른 실행
 
 ```powershell
+git clone https://github.com/jungle-final-project/prototype.git
+cd prototype
 docker compose up --build
 ```
 
-- 웹: http://localhost:5173
-- API: http://localhost:8080/api/health
-- RabbitMQ: http://localhost:15672
-- Mailpit: http://localhost:8025
+서비스 주소:
 
-## 검증
+| 서비스 | 주소 |
+| --- | --- |
+| 웹 | http://localhost:5173 |
+| API health | http://localhost:8080/api/health |
+| RabbitMQ 관리 화면 | http://localhost:15672 |
+| Mailpit | http://localhost:8025 |
+
+## 개발 명령어
+
+프론트엔드:
+
+```powershell
+cd apps/web
+npm ci
+npm run dev
+npm run test
+```
+
+백엔드:
+
+```powershell
+cd apps/api
+.\gradlew.bat bootRun
+```
+
+macOS/Linux에서는 `./gradlew bootRun`을 사용합니다. 로컬 Java 버전이 맞지 않으면 Docker 기준으로 실행합니다.
+
+```powershell
+docker compose up --build api
+```
+
+OpenAPI 검증:
+
+```powershell
+python tools/validate_openapi.py
+```
+
+PC Agent 샘플 로그:
+
+```powershell
+cd apps/pc-agent
+pip install -r requirements.txt
+python buildgraph_agent.py sample --out ../../seed/sample-agent-log.jsonl
+python buildgraph_agent.py export --source ../../seed/sample-agent-log.jsonl --out recent-30m.jsonl --minutes 30
+```
+
+## PR 전 확인
 
 ```powershell
 cd apps/web
@@ -28,24 +85,32 @@ npm run build
 npm run test
 
 cd ../..
+python tools/validate_openapi.py
 docker compose config
-docker compose up --build
 ```
 
-선택 사항으로 k6 시작 스크립트를 실행할 수 있습니다.
+백엔드 코드를 수정했다면 Java 21 또는 Docker 환경에서 API 빌드도 확인합니다.
 
 ```powershell
-k6 run infra/k6/smoke.js
+cd apps/api
+.\gradlew.bat bootJar --no-daemon
 ```
 
-GitHub Actions는 풀 리퀘스트와 `main` 브랜치 푸시에서 같은 핵심 검사를 실행합니다.
+## 협업 규칙
 
-- `apps/web`: `npm ci`, `npm run build`, `npm run test`
-- `apps/api`: Java 21 `./gradlew bootJar --no-daemon`
-- 루트: `docker compose config`
+- 자기 담당 feature/domain 안에서 먼저 작업합니다.
+- API 요청/응답 구조를 바꾸면 같은 PR에서 [docs/openapi.yaml](docs/openapi.yaml)을 함께 수정합니다.
+- mock 데이터는 담당 feature의 `mocks` 디렉터리에 둡니다.
+- seed 데이터는 담당 백엔드 domain의 `*Seed.java`에 둡니다.
+- `components/ui.tsx`, `prototypeData.ts`, `QuotePages.tsx`, `AdminPages.tsx`는 barrel 용도입니다. 새 구현을 쌓지 않습니다.
+- 운영급 결제/배송/원격제어/최저가/FPS 보장은 이번 프로토타입 범위가 아닙니다.
 
-## 프로토타입 범위
+## CI
 
-이 저장소는 데스크톱 전용 프로토타입 스캐폴드입니다. 14개 핵심 사용자/관리자 화면, 시드 기반 API 응답, DB 연결 런타임 구성, 5인 역할별 작업 공간을 연결합니다.
+Pull Request와 `main` push에서 GitHub Actions가 다음을 확인합니다.
 
-이번 스캐폴드 범위에서 제외하는 항목은 실제 결제/배송, 자체 원격제어, 정확한 FPS 보장, 최저가 보장, 운영용 AI/RAG 외부 연동입니다.
+- 웹 의존성 설치, build, 17개 route smoke test
+- OpenAPI YAML 및 핵심 POST requestBody 검증
+- API `bootJar` 빌드
+- Docker Compose config 검증
+- API jar 실행 후 `/api/health` runtime smoke
