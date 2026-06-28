@@ -3,6 +3,7 @@ apps/web/node_modules/
 apps/web/dist/
 apps/api/build/
 apps/api/.gradle/
+apps/api/bin/
 *.log
 .env
 .DS_Store
@@ -16,4 +17,6 @@ test-results/
 playwright-report/
 .cache/
 .idea/
+.vscode/
+.devcontainer/devcontainer-lock.json
 *.tsbuildinfo
