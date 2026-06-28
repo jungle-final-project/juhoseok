@@ -2,10 +2,10 @@ import { ReactNode, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ShieldAlert } from 'lucide-react';
 import { Screen, StateMessage } from '../../components/ui';
-import { getToken } from '../../lib/api';
+import { ApiError, getToken } from '../../lib/api';
 import { getCurrentUser } from './authApi';
 
-type AdminCheckState = 'checking' | 'missing-token' | 'forbidden' | 'allowed';
+type AdminCheckState = 'checking' | 'missing-token' | 'unauthorized' | 'forbidden' | 'allowed';
 
 export function RequireAdmin({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AdminCheckState>('checking');
@@ -25,9 +25,9 @@ export function RequireAdmin({ children }: { children: ReactNode }) {
           setState(user.role === 'ADMIN' ? 'allowed' : 'forbidden');
         }
       })
-      .catch(() => {
+      .catch((error) => {
         if (!cancelled) {
-          setState('forbidden');
+          setState(error instanceof ApiError && error.status === 401 ? 'unauthorized' : 'forbidden');
         }
       });
 
@@ -62,9 +62,9 @@ function AdminPermissionCheckingPage() {
 }
 
 function AdminPermissionRequiredPage({ reason }: { reason: Exclude<AdminCheckState, 'checking' | 'allowed'> }) {
-  const message = reason === 'missing-token'
-    ? '관리자 화면을 보려면 먼저 로그인해야 합니다.'
-    : '현재 로그인한 계정에는 관리자 권한이 없습니다.';
+  const message = reason === 'forbidden'
+    ? '현재 로그인한 계정에는 관리자 권한이 없습니다.'
+    : '관리자 화면을 보려면 먼저 로그인해야 합니다.';
 
   return (
     <Screen>
