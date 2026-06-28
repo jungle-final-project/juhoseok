@@ -71,6 +71,27 @@ docker compose up --build
 
 `.devcontainer/devcontainer.json`은 Node 22, Java 21, Python 3.11, Docker CLI를 포함합니다. 컨테이너가 처음 열릴 때 `scripts/setup-dev.sh`가 실행되어 웹 의존성과 Python 도구 의존성을 설치합니다.
 
+## Java 21 로컬 설치
+
+API는 Java 21을 기준으로 빌드합니다. 로컬 Java 버전이 다르면 `./gradlew bootJar --no-daemon`이 실패할 수 있으므로 백엔드 코드를 수정하는 팀원은 Java 21을 설치합니다.
+
+현재 Java 버전 확인:
+
+```bash
+java -version
+```
+
+macOS Homebrew 예시:
+
+```bash
+brew install --cask temurin@21
+/usr/libexec/java_home -V
+export JAVA_HOME=$(/usr/libexec/java_home -v 21)
+java -version
+```
+
+Windows에서는 Eclipse Temurin 21 또는 Microsoft Build of OpenJDK 21을 설치한 뒤 새 터미널에서 `java -version`을 확인합니다. 로컬 버전 맞추기가 어렵다면 Dev Container를 기준 환경으로 사용합니다.
+
 ## 로컬 의존성 한 번에 설치
 
 Docker만 사용할 때는 이 단계가 필요 없습니다. 로컬에서 프론트엔드, OpenAPI 검증, PC Agent를 직접 실행할 팀원은 아래 스크립트를 한 번 실행합니다.
@@ -136,21 +157,29 @@ macOS/Linux에서 `pip` 또는 `python` 명령이 없다면 `pip3`, `python3`를
 
 ## PR 전 확인
 
-```powershell
-cd apps/web
-npm run build
-npm run test
+저장소 루트에서 아래 명령을 실행합니다.
 
-cd ../..
+```bash
+npm --prefix apps/web run build
+npm --prefix apps/web run test
 python tools/validate_openapi.py
 docker compose config
 ```
 
 백엔드 코드를 수정했다면 Java 21 또는 Docker 환경에서 API 빌드도 확인합니다.
 
+Windows:
+
 ```powershell
 cd apps/api
 .\gradlew.bat bootJar --no-daemon
+```
+
+macOS/Linux:
+
+```bash
+cd apps/api
+./gradlew bootJar --no-daemon
 ```
 
 ## 협업 규칙
@@ -164,10 +193,42 @@ cd apps/api
 
 ## CI
 
-Pull Request와 `main` push에서 GitHub Actions가 다음을 확인합니다.
+Pull Request와 `main`, `dev` push에서 GitHub Actions가 다음을 확인합니다.
 
 - 웹 의존성 설치, build, 17개 route smoke test
 - OpenAPI YAML 및 핵심 POST requestBody 검증
 - API `bootJar` 빌드
 - Docker Compose config 검증
 - API jar 실행 후 `/api/health` runtime smoke
+
+CI 실행 조건:
+
+| 상황 | CI 실행 여부 |
+| --- | --- |
+| 개인 브랜치에 그냥 push | 실행 안 됨 |
+| 개인 브랜치에서 PR 생성 | 실행됨 |
+| PR에 새 commit push | 실행됨 |
+| PR을 dev로 merge | 실행됨 |
+| PR을 main으로 merge | 실행됨 |
+| main에 직접 push | 실행됨 |
+| dev에 직접 push | 실행됨 |
+
+브랜치 보호 권장 설정:
+
+| 브랜치 | 설정 |
+| --- | --- |
+| `main` | PR 필수, `Build and smoke test` required check, force push 금지, 삭제 금지 |
+| `dev` | PR 필수, `Build and smoke test` required check, force push 금지, 삭제 금지 |
+
+CI 실패 시 먼저 확인할 GitHub Actions step:
+
+| 실패 위치 | 확인할 내용 |
+| --- | --- |
+| `Build web` | TypeScript 또는 Vite build 오류 |
+| `Run web route smoke tests` | Playwright route, admin guard, 화면 렌더링 오류 |
+| `Validate OpenAPI YAML` | `docs/openapi.yaml` 경로, schema, requestBody 누락 |
+| `Build API` | Java 21, Gradle, Spring compile/package 오류 |
+| `Validate Docker Compose` | `compose.yaml` 문법, service, volume, port 설정 오류 |
+| `Run API runtime smoke test` | PostgreSQL health, API jar 실행, `/api/health` DB 연결 오류 |
+
+CI가 안정적으로 통과하면 다음 단계로 Docker image build 검증을 추가합니다. 이 단계는 이미지를 registry에 push하지 않고 `docker build`만 실행해 Dockerfile이 깨졌는지 확인합니다. CD와 AWS 배포 자동화는 CI가 안정화된 뒤 별도 workflow로 설계합니다.
