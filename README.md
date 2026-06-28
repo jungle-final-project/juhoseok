@@ -171,3 +171,5 @@ Pull Request와 `main` push에서 GitHub Actions가 다음을 확인합니다.
 - API `bootJar` 빌드
 - Docker Compose config 검증
 - API jar 실행 후 `/api/health` runtime smoke
+
+ㅁㅁ
