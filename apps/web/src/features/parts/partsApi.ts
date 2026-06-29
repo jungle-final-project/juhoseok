@@ -1,11 +1,19 @@
 import { api } from '../../lib/api';
+import type { PartPage, PartSearchParams, PartRow } from './types';
 
-export function listParts() {
-  return api('/api/parts');
+export function listParts(params: PartSearchParams = {}) {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') {
+      search.set(key, String(value));
+    }
+  });
+  const query = search.toString();
+  return api<PartPage>(`/api/parts${query ? `?${query}` : ''}`);
 }
 
 export function getPart(partId: string) {
-  return api(`/api/parts/${partId}`);
+  return api<PartRow>(`/api/parts/${partId}`);
 }
 
 export function runToolCheck(tool: 'compatibility' | 'power' | 'size' | 'performance' | 'price', payload: unknown) {
