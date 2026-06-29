@@ -92,15 +92,15 @@ export function RequirementPage() {
             </form>
           </Panel>
 
-          <Panel title="파싱 결과" subtitle="분석 API가 저장한 requirement 기준">
-            {parseMutation.isIdle ? <StateMessage type="info" title="아직 분석 전" body="왼쪽 자연어 요구사항을 입력하고 분석을 실행하면 구조화된 결과가 표시됩니다." /> : null}
-            {parseMutation.isPending ? <StateMessage type="info" title="요구사항 분석 중" body="자연어에서 예산, 용도, 해상도, 선호 조건을 추출하고 있습니다." /> : null}
+          <Panel title="AI 분석 상태" subtitle="추천 준비 진행 상황">
+            {parseMutation.isIdle ? <StateMessage type="info" title="분석 전" body="요구사항을 입력하면 AI가 추천에 필요한 조건을 정리합니다." /> : null}
+            {parseMutation.isPending ? <StateMessage type="info" title="요구사항 분석 중" body="입력 내용을 바탕으로 추천 준비와 추가 질문 생성을 진행하고 있습니다." /> : null}
             {parseMutation.isError ? <StateMessage type="warn" title="요구사항 분석 실패" body="자연어 입력이 비어 있거나 API 응답을 불러오지 못했습니다." /> : null}
-            {parsed ? <DataTable columns={['필드', '값', '확신도']} rows={parseRows(parsed)} /> : null}
+            {parsed ? <StateMessage type="success" title="분석 완료" body="추천에 필요한 기본 조건을 정리했습니다. 필요한 추가 질문만 오른쪽에 표시했습니다." /> : null}
           </Panel>
 
           <Panel title="추가 질문" subtitle="모호한 항목만 선택적으로 답변">
-            {!parsed ? <StateMessage type="info" title="분석 후 활성화" body="추가 질문은 파싱 결과를 기반으로 생성됩니다." /> : null}
+            {!parsed ? <StateMessage type="info" title="분석 후 활성화" body="추가 질문은 AI 분석 후 필요한 항목만 표시됩니다." /> : null}
             {parsed ? (
               <div className="space-y-3">
                 {parsed.questions.length === 0 ? <StateMessage type="success" title="추가 질문 없음" body="추천 생성에 필요한 기본 조건이 충족되었습니다." /> : null}
@@ -181,22 +181,6 @@ function Input({ label, value, onChange, placeholder }: { label: string; value: 
   );
 }
 
-function parseRows(parsed: ParsedRequirement) {
-  const context = parsed.parsedContext ?? {};
-  const confidence = context.confidence instanceof Object && !Array.isArray(context.confidence) ? context.confidence as Record<string, unknown> : {};
-  return [
-    { 필드: 'parseMode', 값: String(context.parseMode ?? '-'), 확신도: <StatusBadge status={String(context.parseMode).includes('FALLBACK') ? 'WARN' : 'HIGH'} /> },
-    { 필드: 'parser', 값: String(context.parser ?? '-'), 확신도: <StatusBadge status={parsed.agentSessionId ? 'HIGH' : 'MEDIUM'} /> },
-    { 필드: 'budget', 값: parsed.budget ? `${parsed.budget.toLocaleString()}원` : '-', 확신도: <StatusBadge status={String(confidence.budget ?? 'LOW')} /> },
-    { 필드: 'usageTags', 값: parsed.usageTags.join(', '), 확신도: <StatusBadge status={String(confidence.usageTags ?? 'MEDIUM')} /> },
-    { 필드: 'resolution', 값: String(context.resolution ?? '-'), 확신도: <StatusBadge status={String(confidence.resolution ?? 'LOW')} /> },
-    { 필드: 'preferredVendors', 값: arrayText(context.preferredVendors), 확신도: <StatusBadge status={String(confidence.preferredVendors ?? 'LOW')} /> },
-    { 필드: 'mustHave', 값: arrayText(context.mustHave), 확신도: <StatusBadge status="MEDIUM" /> },
-    { 필드: 'parseEvidence', 값: parsed.evidenceIds?.length ? `${parsed.evidenceIds.length}개` : '-', 확신도: <StatusBadge status={parsed.evidenceIds?.length ? 'HIGH' : 'LOW'} /> },
-    { 필드: 'agentSummary', 값: parsed.agentSummary ?? String(context.parseNotes ?? '-'), 확신도: <StatusBadge status={parsed.agentSummary ? 'HIGH' : 'MEDIUM'} /> }
-  ];
-}
-
 function toolRows(results: ToolResult[]) {
   return results.map((row) => ({
     tool: row.tool,
@@ -217,8 +201,4 @@ function numberOrUndefined(value: string) {
   }
   const parsed = Number.parseInt(normalized, 10);
   return Number.isFinite(parsed) ? parsed : undefined;
-}
-
-function arrayText(value: unknown) {
-  return Array.isArray(value) && value.length > 0 ? value.join(', ') : '-';
 }
