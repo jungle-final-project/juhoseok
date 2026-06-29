@@ -160,6 +160,8 @@ Google OAuth 정책:
 | `GET` | `/api/builds/history` | USER | 1번 | `?page=0&size=20` | `{ "items": [{ "id": "3ff6d7a2-1c51-4c9d-9720-94b7ef1d62bd", "name": "QHD Gaming Build", "totalPrice": 1450000, "confidence": "HIGH", "createdAt": "2026-06-29T10:20:00Z" }], "page": 0, "size": 20, "total": 1 }` | `requirements`, `builds` |
 | `POST` | `/api/builds/{id}/change-part` | USER | 1번 | `{ "category": "GPU", "partId": "0e9f3b8b-8c83-4d9a-9f7d-1f2b4dfb8a11" }` | `{ "buildId": "3ff6d7a2-1c51-4c9d-9720-94b7ef1d62bd", "category": "GPU", "previousPartId": "0bb1f994-5e1f-4dc4-b55c-c615130e1bb4", "selectedPartId": "0e9f3b8b-8c83-4d9a-9f7d-1f2b4dfb8a11", "totalPrice": 1500000, "diff": { "price": 50000 }, "beforeBuild": {}, "afterBuild": { "id": "3ff6d7a2-1c51-4c9d-9720-94b7ef1d62bd", "name": "QHD Gaming Build", "totalPrice": 1500000, "items": [] }, "diffRows": [{ "label": "GPU", "before": "RTX 5060", "after": "RTX 5070", "diff": "+50,000원", "status": "PASS" }], "toolResults": [], "agentSummary": "변경 비교 요약", "warnings": [] }` | `builds`, `build_items`, `parts` |
 
+`RequirementDto.parsedContext`는 추천 품질을 위해 내부 해석 필드를 포함할 수 있다. `performanceTier`는 `ENTHUSIAST | PERFORMANCE | STANDARD`, `budgetPolicy`는 `USER_BUDGET | OPEN_BUDGET | DEFAULT_BUDGET` 중 하나다. 예산 없는 최고급 의도는 RAG 정책 근거를 사용해 `performanceTier=ENTHUSIAST`, `budgetPolicy=OPEN_BUDGET`으로 저장할 수 있고, 추천 결과는 첫 카드부터 끝판왕/하이엔드 체급으로 정렬한다. 사용자가 예산을 명시한 경우에는 예산을 우선한다.
+
 `POST /api/builds/recommend` transaction 경계:
 
 1. request 검증과 requirement 소유권 확인은 transaction 밖에서 수행한다. 소유자가 아니면 `404 NOT_FOUND`다.

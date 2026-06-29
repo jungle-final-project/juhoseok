@@ -38,17 +38,27 @@ public class BuildQueryService {
             RAG 근거와 사용자 입력만 사용해 추천 전에 필요한 구조화 JSON을 만드십시오.
             확인되지 않은 예산, 해상도, 제조사, 용도는 지어내지 말고 null 또는 빈 배열로 두십시오.
             usageTags는 GAMING, DEVELOPMENT, VIDEO_EDIT, AI_DEV, GENERAL 중에서만 고르십시오.
+            performanceTier는 ENTHUSIAST, PERFORMANCE, STANDARD 중 하나를 고르십시오.
+            budgetPolicy는 USER_BUDGET, OPEN_BUDGET, DEFAULT_BUDGET 중 하나를 고르십시오.
+            performanceTier와 budgetPolicy는 RAG 근거와 사용자 입력으로 판단하고, 근거가 부족하면 STANDARD와 DEFAULT_BUDGET을 사용하십시오.
             mustHave는 WIFI, LOW_NOISE 중 확인된 조건만 넣으십시오.
             confidence 값은 LOW, MEDIUM, HIGH 중 하나만 쓰십시오.
             응답은 설명 문장 없이 JSON object 하나만 반환하십시오.
             """;
+    private static final int DEFAULT_BUDGET = 2_000_000;
+    private static final int ENTHUSIAST_OPEN_BUDGET = 12_000_000;
     private static final List<String> BUILD_CATEGORIES = List.of(
             "CPU", "MOTHERBOARD", "RAM", "GPU", "STORAGE", "PSU", "CASE", "COOLER"
     );
-    private static final List<BuildPlan> BUILD_PLANS = List.of(
+    private static final List<BuildPlan> DEFAULT_BUILD_PLANS = List.of(
             new BuildPlan("가성비형 추천 Build", "예산 안에서 핵심 성능을 먼저 확보", 0, 0.78, "MEDIUM"),
             new BuildPlan("균형형 추천 Build", "게임, 개발, 안정성을 균형 있게 반영", 1, 0.96, "HIGH"),
             new BuildPlan("고성능형 추천 Build", "성능 우선 조건과 업그레이드 여유 확보", 2, 1.14, "MEDIUM")
+    );
+    private static final List<BuildPlan> ENTHUSIAST_BUILD_PLANS = List.of(
+            new BuildPlan("끝판왕 추천 Build", "예산 제한 없이 내부 자산의 최상위 성능을 우선", 3, 1.14, "HIGH"),
+            new BuildPlan("하이엔드 균형 Build", "플래그십 성능과 구성 안정성을 균형 있게 확보", 2, 0.96, "HIGH"),
+            new BuildPlan("프리미엄 안정 Build", "과한 지출을 줄이되 하이엔드 체급을 유지", 1, 0.78, "MEDIUM")
     );
 
     private final JdbcTemplate jdbcTemplate;
@@ -129,8 +139,9 @@ public class BuildQueryService {
         RequirementRow requirement = requirement(requirementId);
         Map<String, Object> answers = objectMap(request == null ? null : request.get("answers"));
         int budget = effectiveBudget(requirement, answers);
+        List<BuildPlan> buildPlans = buildPlansFor(requirement);
         List<String> createdBuildIds = new ArrayList<>();
-        for (BuildPlan plan : BUILD_PLANS) {
+        for (BuildPlan plan : buildPlans) {
             List<PartCandidate> parts = selectBuildParts(requirement, answers, plan, budget);
             List<Map<String, Object>> toolResults = evaluateTools(parts, budget);
             List<Map<String, Object>> warnings = warningsFor(toolResults, total(parts), budget);
@@ -616,6 +627,8 @@ public class BuildQueryService {
                                 "resolution", "FHD | QHD | 4K | null",
                                 "preferredVendors", List.of("NVIDIA", "AMD", "INTEL"),
                                 "priority", "string or null",
+                                "performanceTier", "ENTHUSIAST | PERFORMANCE | STANDARD",
+                                "budgetPolicy", "USER_BUDGET | OPEN_BUDGET | DEFAULT_BUDGET",
                                 "mustHave", List.of("WIFI", "LOW_NOISE"),
                                 "confidence", MockData.map("budget", "LOW|MEDIUM|HIGH", "usageTags", "LOW|MEDIUM|HIGH", "resolution", "LOW|MEDIUM|HIGH", "preferredVendors", "LOW|MEDIUM|HIGH"),
                                 "parseNotes", "short Korean sentence"
@@ -641,6 +654,8 @@ public class BuildQueryService {
                 "resolution", resolution,
                 "preferredVendors", preferredVendors,
                 "priority", priority,
+                "performanceTier", "STANDARD",
+                "budgetPolicy", budget == null ? "DEFAULT_BUDGET" : "USER_BUDGET",
                 "mustHave", mustHave,
                 "confidence", MockData.map(
                         "usageTags", usageTags.isEmpty() ? "LOW" : "HIGH",
@@ -686,6 +701,8 @@ public class BuildQueryService {
             preferredVendors = normalizeVendors(stringList(fallback.get("preferredVendors")));
         }
         String priority = firstText(text(source.get("priority")), text(fallback.get("priority")));
+        String performanceTier = normalizePerformanceTier(firstText(text(source.get("performanceTier")), text(fallback.get("performanceTier"))));
+        String budgetPolicy = normalizeBudgetPolicy(firstText(text(source.get("budgetPolicy")), text(fallback.get("budgetPolicy"))));
         List<String> mustHave = normalizeMustHave(stringList(source.get("mustHave")));
         if (mustHave.isEmpty()) {
             mustHave = normalizeMustHave(stringList(fallback.get("mustHave")));
@@ -700,6 +717,8 @@ public class BuildQueryService {
         result.put("resolution", resolution);
         result.put("preferredVendors", preferredVendors);
         result.put("priority", priority);
+        result.put("performanceTier", performanceTier);
+        result.put("budgetPolicy", budgetPolicy);
         result.put("mustHave", mustHave);
         result.put("confidence", confidence);
         String parseNotes = firstText(text(source.get("parseNotes")), text(fallback.get("parseNotes")));
@@ -909,12 +928,25 @@ public class BuildQueryService {
             budget = numberValue(parsedBudget);
         }
         if (budget == null || budget <= 0) {
-            budget = 2_000_000;
+            budget = isOpenBudgetEnthusiast(requirement) ? ENTHUSIAST_OPEN_BUDGET : DEFAULT_BUDGET;
         }
         if ("넉넉하게".equals(answers.get("upgradePlan"))) {
             budget = (int) Math.round(budget * 1.06);
         }
         return budget;
+    }
+
+    private static List<BuildPlan> buildPlansFor(RequirementRow requirement) {
+        return isOpenBudgetEnthusiast(requirement) ? ENTHUSIAST_BUILD_PLANS : DEFAULT_BUILD_PLANS;
+    }
+
+    private static boolean isOpenBudgetEnthusiast(RequirementRow requirement) {
+        Map<String, Object> context = requirement.parsedContext();
+        String performanceTier = normalizePerformanceTier(text(context.get("performanceTier")));
+        String budgetPolicy = normalizeBudgetPolicy(text(context.get("budgetPolicy")));
+        return ("ENTHUSIAST".equals(performanceTier) || "OPEN_BUDGET".equals(budgetPolicy))
+                && requirement.budget() == null
+                && numberValue(context.get("budget")) == null;
     }
 
     private static int target(int budget, BuildPlan plan, double allocation) {
@@ -1030,6 +1062,15 @@ public class BuildQueryService {
     private static String recommendedFor(String name) {
         if (name == null) {
             return "맞춤 추천";
+        }
+        if (name.contains("끝판왕")) {
+            return "최상위 성능 우선";
+        }
+        if (name.contains("하이엔드")) {
+            return "하이엔드 균형";
+        }
+        if (name.contains("프리미엄")) {
+            return "프리미엄 안정";
         }
         if (name.contains("가성비")) {
             return "예산 우선";
@@ -1248,6 +1289,22 @@ public class BuildQueryService {
             }
         }
         return new ArrayList<>(result);
+    }
+
+    private static String normalizePerformanceTier(String value) {
+        String upper = value == null ? null : value.toUpperCase(Locale.ROOT);
+        if ("ENTHUSIAST".equals(upper) || "PERFORMANCE".equals(upper) || "STANDARD".equals(upper)) {
+            return upper;
+        }
+        return "STANDARD";
+    }
+
+    private static String normalizeBudgetPolicy(String value) {
+        String upper = value == null ? null : value.toUpperCase(Locale.ROOT);
+        if ("USER_BUDGET".equals(upper) || "OPEN_BUDGET".equals(upper) || "DEFAULT_BUDGET".equals(upper)) {
+            return upper;
+        }
+        return "DEFAULT_BUDGET";
     }
 
     private static Map<String, Object> normalizeConfidence(Map<String, Object> source, Map<String, Object> fallback) {
