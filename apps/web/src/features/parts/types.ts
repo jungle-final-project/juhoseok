@@ -19,6 +19,7 @@ export type PartRow = {
     offerUrl?: string | null;
     lowPrice?: number | null;
     source?: string | null;
+    refreshedAt?: string | null;
   } | null;
   score?: number;
 };

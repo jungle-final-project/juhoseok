@@ -16,11 +16,9 @@ public class PartQueryService {
     private static final Set<String> CATEGORIES = Set.of("CPU", "GPU", "RAM", "MOTHERBOARD", "STORAGE", "PSU", "CASE", "COOLER");
     private static final Set<String> STATUSES = Set.of("ACTIVE", "INACTIVE", "DISCONTINUED");
     private final JdbcTemplate jdbcTemplate;
-    private final NaverShoppingOfferService naverShoppingOfferService;
 
-    public PartQueryService(JdbcTemplate jdbcTemplate, NaverShoppingOfferService naverShoppingOfferService) {
+    public PartQueryService(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
-        this.naverShoppingOfferService = naverShoppingOfferService;
     }
 
     public Map<String, Object> parts(
@@ -55,7 +53,14 @@ public class PartQueryService {
                                bs.summary AS benchmark_summary,
                                bs.score AS benchmark_score,
                                ps.source AS latest_price_source,
-                               ps.collected_at AS latest_price_collected_at
+                               ps.collected_at AS latest_price_collected_at,
+                               peo.title AS external_offer_title,
+                               peo.image_url AS external_offer_image_url,
+                               peo.supplier_name AS external_offer_supplier_name,
+                               peo.offer_url AS external_offer_url,
+                               peo.low_price AS external_offer_low_price,
+                               peo.source AS external_offer_source,
+                               peo.refreshed_at AS external_offer_refreshed_at
                         FROM parts p
                         LEFT JOIN LATERAL (
                           SELECT b.summary, b.score
@@ -72,6 +77,10 @@ public class PartQueryService {
                           ORDER BY snapshot.collected_at DESC, snapshot.id DESC
                           LIMIT 1
                         ) ps ON true
+                        LEFT JOIN part_external_offers peo
+                          ON peo.part_id = p.id
+                         AND peo.source = 'NAVER_SHOPPING_SEARCH'
+                         AND peo.deleted_at IS NULL
                         WHERE p.public_id = ?::uuid
                           AND p.deleted_at IS NULL
                         """, id)
@@ -113,7 +122,14 @@ public class PartQueryService {
                                bs.summary AS benchmark_summary,
                                bs.score AS benchmark_score,
                                ps.source AS latest_price_source,
-                               ps.collected_at AS latest_price_collected_at
+                               ps.collected_at AS latest_price_collected_at,
+                               peo.title AS external_offer_title,
+                               peo.image_url AS external_offer_image_url,
+                               peo.supplier_name AS external_offer_supplier_name,
+                               peo.offer_url AS external_offer_url,
+                               peo.low_price AS external_offer_low_price,
+                               peo.source AS external_offer_source,
+                               peo.refreshed_at AS external_offer_refreshed_at
                         FROM parts p
                         LEFT JOIN LATERAL (
                           SELECT b.summary, b.score
@@ -130,6 +146,10 @@ public class PartQueryService {
                           ORDER BY snapshot.collected_at DESC, snapshot.id DESC
                           LIMIT 1
                         ) ps ON true
+                        LEFT JOIN part_external_offers peo
+                          ON peo.part_id = p.id
+                         AND peo.source = 'NAVER_SHOPPING_SEARCH'
+                         AND peo.deleted_at IS NULL
                         """ + where.sql() + " ORDER BY " + orderBy(search.sort()) + " LIMIT ? OFFSET ?",
                         params.toArray())
                 .stream()
@@ -157,11 +177,7 @@ public class PartQueryService {
                 "benchmarkSummary", benchmarkSummary(row),
                 "latestPriceSource", DbValueMapper.string(row, "latest_price_source"),
                 "latestPriceCollectedAt", DbValueMapper.timestamp(row, "latest_price_collected_at"),
-                "externalOffer", naverShoppingOfferService.offerFor(
-                        DbValueMapper.string(row, "id"),
-                        DbValueMapper.string(row, "name"),
-                        DbValueMapper.string(row, "manufacturer")
-                ).orElse(null)
+                "externalOffer", externalOffer(row)
         );
     }
 
@@ -171,6 +187,22 @@ public class PartQueryService {
             return null;
         }
         return MockData.map("summary", summary, "score", row.get("benchmark_score"));
+    }
+
+    private static Map<String, Object> externalOffer(Map<String, Object> row) {
+        String source = DbValueMapper.string(row, "external_offer_source");
+        if (source == null) {
+            return null;
+        }
+        return MockData.map(
+                "title", DbValueMapper.string(row, "external_offer_title"),
+                "imageUrl", DbValueMapper.string(row, "external_offer_image_url"),
+                "supplierName", DbValueMapper.string(row, "external_offer_supplier_name"),
+                "offerUrl", DbValueMapper.string(row, "external_offer_url"),
+                "lowPrice", DbValueMapper.integer(row, "external_offer_low_price"),
+                "source", source,
+                "refreshedAt", DbValueMapper.timestamp(row, "external_offer_refreshed_at")
+        );
     }
 
     private static SqlWhere whereClause(PartSearch search) {

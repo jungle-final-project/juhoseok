@@ -13,9 +13,11 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api")
 public class PartController {
     private final PartQueryService partQueryService;
+    private final NaverShoppingOfferService naverShoppingOfferService;
 
-    public PartController(PartQueryService partQueryService) {
+    public PartController(PartQueryService partQueryService, NaverShoppingOfferService naverShoppingOfferService) {
         this.partQueryService = partQueryService;
+        this.naverShoppingOfferService = naverShoppingOfferService;
     }
 
     @GetMapping("/parts")
@@ -36,6 +38,15 @@ public class PartController {
     @GetMapping("/parts/{id}")
     Map<String, Object> part(@PathVariable String id) {
         return partQueryService.part(id);
+    }
+
+    @PostMapping("/admin/parts/external-offers/refresh")
+    Map<String, Object> refreshExternalOffers(
+            @RequestParam(value = "category", required = false) String category,
+            @RequestParam(value = "limit", required = false) Integer limit,
+            @RequestParam(value = "force", required = false) Boolean force
+    ) {
+        return naverShoppingOfferService.refreshOffers(category, limit, force);
     }
 
     @PostMapping("/tools/compatibility/check")

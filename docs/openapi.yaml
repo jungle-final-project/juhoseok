@@ -312,6 +312,34 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PriceJobDto"
+  /api/admin/parts/external-offers/refresh:
+    post:
+      summary: 외부 상품 캐시 갱신
+      description: 네이버 쇼핑 검색 API를 호출해 part_external_offers 캐시를 갱신한다. 사용자 부품 조회 API는 이 캐시만 읽는다.
+      parameters:
+        - in: query
+          name: category
+          schema:
+            $ref: "#/components/schemas/PartCategory"
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - in: query
+          name: force
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: 갱신 결과
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExternalOfferRefreshResponse"
   /api/tools/compatibility/check:
     post:
       summary: 호환성 Tool check
@@ -956,6 +984,34 @@ components:
           type: string
           format: date-time
           nullable: true
+        externalOffer:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/PartExternalOfferDto"
+    PartExternalOfferDto:
+      type: object
+      properties:
+        title:
+          type: string
+          nullable: true
+        imageUrl:
+          type: string
+          nullable: true
+        supplierName:
+          type: string
+          nullable: true
+        offerUrl:
+          type: string
+          nullable: true
+        lowPrice:
+          type: integer
+          nullable: true
+        source:
+          type: string
+        refreshedAt:
+          type: string
+          format: date-time
+          nullable: true
     PriceAlertCreateRequest:
       type: object
       required: [partId, targetPrice]
@@ -1012,6 +1068,29 @@ components:
         createdAt:
           type: string
           format: date-time
+    ExternalOfferRefreshResponse:
+      type: object
+      required: [configured, limit, attempted, updated, skipped, failed]
+      properties:
+        configured:
+          type: boolean
+        category:
+          $ref: "#/components/schemas/PartCategory"
+          nullable: true
+        limit:
+          type: integer
+        force:
+          type: boolean
+        attempted:
+          type: integer
+        updated:
+          type: integer
+        skipped:
+          type: integer
+        failed:
+          type: integer
+        message:
+          type: string
     ToolCheckRequest:
       type: object
       required: [partIds, context]

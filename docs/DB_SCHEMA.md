@@ -171,6 +171,7 @@ users
 
 parts
   ├─ price_snapshots
+  ├─ part_external_offers
   ├─ build_items
   ├─ price_alerts
   ├─ compatibility_rules
@@ -371,6 +372,39 @@ Index:
 
 - index: `price_snapshots.part_id`
 - index: `(part_id, collected_at)`
+
+### part_external_offers
+
+목적: 쇼핑몰 화면에 표시할 외부 상품 사진, 공급업체, 최저가 후보를 캐시한다. `/api/parts`는 이 테이블만 읽고, 네이버 쇼핑 검색 API는 관리자 갱신 작업에서만 호출한다.
+
+주 owner: 2번
+
+협업자: 5번
+
+| 컬럼명 | 타입 | nullable | FK | 설명 |
+|---|---|---:|---|---|
+| `id` | `BIGINT` | no | - | 내부 PK |
+| `part_id` | `BIGINT` | no | `parts.id` | 대상 부품 |
+| `source` | `VARCHAR(100)` | no | - | `NAVER_SHOPPING_SEARCH` 등 외부 출처 |
+| `search_query` | `VARCHAR(255)` | no | - | 갱신에 사용한 검색어 |
+| `title` | `VARCHAR(500)` | yes | - | 외부 상품명 |
+| `image_url` | `TEXT` | yes | - | 상품 이미지 URL |
+| `supplier_name` | `VARCHAR(255)` | yes | - | 공급업체 또는 mall name |
+| `offer_url` | `TEXT` | yes | - | 외부 상품 URL |
+| `low_price` | `INTEGER` | yes | - | 외부 검색 결과의 최저가 후보 |
+| `raw_payload` | `JSONB` | yes | - | 외부 검색 결과 원문 요약 |
+| `refreshed_at` | `TIMESTAMPTZ` | no | - | 마지막 갱신 시각 |
+| `created_at` | `TIMESTAMPTZ` | no | - | 생성 시각 |
+| `updated_at` | `TIMESTAMPTZ` | yes | - | 수정 시각 |
+| `deleted_at` | `TIMESTAMPTZ` | yes | - | soft delete |
+
+Index:
+
+- partial unique: active 상태에서는 `(part_id, source)` 중복을 허용하지 않는다.
+- index: `part_external_offers.part_id`
+- index: `part_external_offers.source`
+- index: `part_external_offers.refreshed_at`
+- index: `part_external_offers.deleted_at`
 
 ### price_alerts
 
@@ -669,6 +703,7 @@ JSONB 허용 대상:
 - `builds.warnings`
 - `parts.attributes`
 - `price_snapshots.raw_payload`
+- `part_external_offers.raw_payload`
 - `compatibility_rules.condition`
 - `benchmark_summaries.metadata`
 - `agent_sessions.state_timeline`
@@ -774,7 +809,9 @@ JSONB 금지 대상:
 | `externalSources` | `object` | yes | 다나와/네이버 등 외부 가격 백업 검색 키워드와 source metadata |
 | `metadataVersion` | `number` | no | attributes shape 버전. MVP 기본값 `1` |
 
-외부 가격 백업은 별도 `products` 테이블을 만들지 않고 `parts` 도메인 안에 보관한다. 수집된 가격은 `price_snapshots.source`, `price_snapshots.raw_payload`에 저장하며, 내부 쇼핑몰 노출 기준 상품명/카테고리/가격은 항상 `parts`를 기준으로 한다.
+외부 가격 백업은 별도 `products` 테이블을 만들지 않고 `parts` 도메인 안에 보관한다. 수집된 가격 이력은 `price_snapshots.source`, `price_snapshots.raw_payload`에 저장하며, 쇼핑몰 목록에 노출할 외부 상품 사진/공급업체/URL 후보는 `part_external_offers`에 캐시한다. 내부 쇼핑몰 노출 기준 상품명/카테고리/기준 가격은 항상 `parts`를 기준으로 한다.
+
+`/api/parts`와 `/api/parts/{id}`는 외부 검색 API를 직접 호출하지 않는다. 외부 검색 API 호출은 관리자 갱신 작업에서만 수행하고, 사용자 화면은 마지막으로 저장된 `part_external_offers` row를 읽는다.
 
 쇼핑몰 기본 목록은 `parts.status = 'ACTIVE'`인 row만 노출한다. 구형 seed나 기준에서 제외된 자산은 `INACTIVE`로 보관하고, 관리자나 점검 목적에서만 명시적으로 조회한다.
 
@@ -976,6 +1013,9 @@ V4__quote_build.sql
 V5__support_ticket.sql
 V6__agent_rag_tool.sql
 V7__admin_audit_seed.sql
+V8__parts_catalog_seed.sql
+V9__current_lineup_parts_seed.sql
+V10__part_external_offers_cache.sql
 ```
 
 현재 저장소에는 위 순서의 Flyway migration이 반영되어 있다. 기존 PostgreSQL volume이 남아 있으면 새 migration과 seed가 다시 실행되지 않으므로, 공통 DB를 처음부터 검증할 때는 `docker compose down -v` 후 `docker compose up --build`를 사용한다.
