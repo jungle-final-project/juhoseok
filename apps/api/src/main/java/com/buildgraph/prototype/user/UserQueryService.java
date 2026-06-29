@@ -20,8 +20,12 @@ public class UserQueryService {
         this.passwordService = passwordService;
     }
 
-    public Map<String, Object> login(String email) {
+    public Map<String, Object> login(String email, String password) {
         Map<String, Object> user = findByEmail(email);
+        String passwordHash = DbValueMapper.string(user, "password_hash");
+        if (!passwordService.matches(password, passwordHash)) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "이메일 또는 비밀번호가 올바르지 않습니다.");
+        }
         String role = DbValueMapper.string(user, "role");
         return MockData.map(
                 "accessToken", "demo-access-" + role.toLowerCase(),
@@ -70,7 +74,7 @@ public class UserQueryService {
 
     private List<Map<String, Object>> findRowsByEmail(String email) {
         return jdbcTemplate.queryForList("""
-                SELECT public_id::text AS id, email, name, role, created_at
+                SELECT public_id::text AS id, email, password_hash, name, role, created_at
                 FROM users
                 WHERE email = ?
                   AND deleted_at IS NULL

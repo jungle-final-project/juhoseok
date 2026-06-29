@@ -25,7 +25,7 @@ public class UserController {
 
     @PostMapping("/auth/login")
     Map<String, Object> login(@Valid @RequestBody LoginRequest request) {
-        return userQueryService.login(request.email());
+        return userQueryService.login(request.email(), request.password());
     }
 
     @PostMapping("/users")
