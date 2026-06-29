@@ -23,6 +23,12 @@ import org.springframework.web.server.ResponseStatusException;
 public class NaverShoppingOfferService {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final Set<String> CATEGORIES = Set.of("CPU", "GPU", "RAM", "MOTHERBOARD", "STORAGE", "PSU", "CASE", "COOLER");
+    private static final Set<String> MATCH_STOPWORDS = Set.of(
+            "정품", "벌크", "멀티팩", "국내", "배송", "게이밍", "컴퓨터", "PC", "부품",
+            "그래픽", "그래픽카드", "지포스", "GEFORCE", "NVIDIA", "RADEON", "라데온",
+            "메인보드", "마더보드", "케이스", "쿨러", "파워", "파워서플라이", "SSD", "RAM",
+            "블랙", "화이트", "BLACK", "WHITE"
+    );
     private static final String SOURCE = "NAVER_SHOPPING_SEARCH";
     private static final Pattern PSU_WATT_PATTERN = Pattern.compile("(?<!\\d)(\\d{3,4})\\s*(?:[Ww]|$|[^\\d])");
     private static final Pattern SPEED_PATTERN = Pattern.compile("(\\d{4})\\s*(?:MHZ|MT/S)?");
@@ -149,7 +155,7 @@ public class NaverShoppingOfferService {
             params.add(normalizedCategory);
         }
         if (!forceRefresh) {
-            sql.append(" AND (peo.id IS NULL OR peo.refreshed_at < now() - interval '7 days')");
+            sql.append(" AND (peo.id IS NULL OR peo.refreshed_at < now() - interval '1 day')");
         }
         sql.append(" ORDER BY p.category, p.id LIMIT ?");
         params.add(safeLimit);
@@ -165,7 +171,7 @@ public class NaverShoppingOfferService {
             String name = stringValue(part.get("name"));
             String manufacturer = stringValue(part.get("manufacturer"));
             String query = searchQuery(name, manufacturer);
-            Optional<Map<String, Object>> offer = fetchOffer(query);
+            Optional<Map<String, Object>> offer = fetchOffer(normalizedCategory, name, manufacturer, query);
             if (offer.isEmpty()) {
                 skipped += 1;
                 continue;
@@ -190,9 +196,58 @@ public class NaverShoppingOfferService {
         );
     }
 
-    private Optional<Map<String, Object>> fetchOffer(String query) {
-        List<Map<String, Object>> offers = fetchOffers(query, 1);
-        return offers.isEmpty() ? Optional.empty() : Optional.of(offers.get(0));
+    public Map<String, Object> refreshDailyOffers() {
+        if (!configured()) {
+            return MockData.map(
+                    "configured", false,
+                    "categories", CATEGORIES.size(),
+                    "attempted", 0,
+                    "updated", 0,
+                    "skipped", 0,
+                    "failed", 0,
+                    "message", "NAVER_SEARCH_CLIENT_ID 또는 NAVER_SEARCH_CLIENT_SECRET이 설정되지 않았습니다."
+            );
+        }
+
+        int attempted = 0;
+        int updated = 0;
+        int skipped = 0;
+        int failed = 0;
+        List<Map<String, Object>> categoryResults = new ArrayList<>();
+        for (String category : CATEGORIES.stream().sorted().toList()) {
+            Map<String, Object> result = refreshOffers(category, 100, false);
+            categoryResults.add(result);
+            attempted += numberValue(result.get("attempted"));
+            updated += numberValue(result.get("updated"));
+            skipped += numberValue(result.get("skipped"));
+            failed += numberValue(result.get("failed"));
+        }
+
+        return MockData.map(
+                "configured", true,
+                "categories", categoryResults,
+                "attempted", attempted,
+                "updated", updated,
+                "skipped", skipped,
+                "failed", failed
+        );
+    }
+
+    private Optional<Map<String, Object>> fetchOffer(String category, String name, String manufacturer, String query) {
+        List<Map<String, Object>> offers = fetchOffers(query, 10);
+        Map<String, Object> bestOffer = null;
+        int bestScore = Integer.MIN_VALUE;
+        for (Map<String, Object> offer : offers) {
+            if (!isAcceptableCatalogOffer(category, offer) || !isReasonableOfferMatch(category, name, offer)) {
+                continue;
+            }
+            int score = offerMatchScore(name, manufacturer, offer);
+            if (score > bestScore) {
+                bestOffer = offer;
+                bestScore = score;
+            }
+        }
+        return Optional.ofNullable(bestOffer);
     }
 
     private List<Map<String, Object>> fetchOffers(String query, int display) {
@@ -539,7 +594,9 @@ public class NaverShoppingOfferService {
             );
             case "COOLER" -> List.of(
                     "ARCTIC Liquid Freezer III 360", "DeepCool ASSASSIN IV", "Noctua NH-D15 G2",
-                    "Corsair iCUE LINK TITAN 360", "NZXT Kraken Elite 360"
+                    "Corsair iCUE LINK TITAN 360", "NZXT Kraken Elite 360", "Lian Li HydroShift LCD 360R",
+                    "be quiet Dark Rock Pro 5", "Thermalright Phantom Spirit 120 EVO",
+                    "Cooler Master MasterLiquid 360 Atmos", "ASUS ROG Ryujin III 360 ARGB"
             );
             default -> List.of(category);
         };
@@ -1064,16 +1121,30 @@ public class NaverShoppingOfferService {
 
     private static boolean toolReadyFor(String category, Map<String, Object> attributes) {
         return switch (category) {
-            case "CPU" -> hasAll(attributes, "socket", "architecture", "coreCount", "tdpW");
+            case "CPU" -> hasAll(attributes, "socket", "architecture", "coreCount", "threadCount", "tdpW");
             case "MOTHERBOARD" -> hasAll(attributes, "socket", "chipset", "memoryType", "formFactor", "widthMm", "depthMm");
-            case "RAM" -> hasAll(attributes, "memoryType", "capacityGb", "moduleCount", "formFactor");
-            case "GPU" -> hasAll(attributes, "architecture", "wattage", "requiredSystemPowerW", "vramGb", "memoryType", "lengthMm", "slotWidth");
-            case "STORAGE" -> hasAll(attributes, "interface", "capacityGb", "formFactor");
-            case "PSU" -> hasAll(attributes, "capacityW", "atxSpec", "gpuConnector", "depthMm");
-            case "CASE" -> hasAll(attributes, "formFactor", "maxGpuLengthMm", "maxCpuCoolerHeightMm", "radiatorSupportMm", "widthMm", "heightMm", "depthMm");
-            case "COOLER" -> hasAll(attributes, "coolerType", "socketSupport", "tdpW");
+            case "RAM" -> hasAll(attributes, "memoryType", "capacityGb", "speedMhz", "moduleCount", "formFactor");
+            case "GPU" -> hasAll(attributes, "architecture", "wattage", "requiredSystemPowerW", "powerConnector", "vramGb", "memoryType", "lengthMm", "widthMm", "heightMm", "slotWidth");
+            case "STORAGE" -> hasAll(attributes, "interface", "capacityGb", "formFactor", "readMbps", "writeMbps");
+            case "PSU" -> hasAll(attributes, "capacityW", "wattage", "atxSpec", "efficiency", "gpuConnector", "widthMm", "heightMm", "depthMm");
+            case "CASE" -> hasAll(attributes, "formFactor", "maxGpuLengthMm", "maxCpuCoolerHeightMm", "radiatorSupportMm", "maxPsuLengthMm", "widthMm", "heightMm", "depthMm");
+            case "COOLER" -> coolerToolReady(attributes);
             default -> false;
         };
+    }
+
+    private static boolean coolerToolReady(Map<String, Object> attributes) {
+        if (!hasAll(attributes, "coolerType", "socketSupport", "tdpW", "widthMm", "heightMm", "depthMm")) {
+            return false;
+        }
+        String coolerType = String.valueOf(attributes.get("coolerType"));
+        if ("AIR".equals(coolerType)) {
+            return hasAll(attributes, "coolerHeightMm");
+        }
+        if ("LIQUID".equals(coolerType) || "LIQUID_AIO".equals(coolerType)) {
+            return hasAll(attributes, "radiatorLengthMm", "radiatorWidthMm", "radiatorThicknessMm");
+        }
+        return false;
     }
 
     private static boolean hasAll(Map<String, Object> attributes, String... keys) {
@@ -1103,6 +1174,133 @@ public class NaverShoppingOfferService {
                     && !upperTitle.contains("수집 가능한 모델");
         }
         return true;
+    }
+
+    private static boolean isReasonableOfferMatch(String category, String name, Map<String, Object> offer) {
+        String title = stringValue(offer.get("title"));
+        if (!StringUtils.hasText(name) || !StringUtils.hasText(title)) {
+            return false;
+        }
+        String normalizedName = normalizeForMatch(name);
+        String normalizedTitle = normalizeForMatch(title);
+        if (hasOptionConflict(category, normalizedName, normalizedTitle)) {
+            return false;
+        }
+        List<String> tokens = importantTokens(name);
+        if (tokens.isEmpty()) {
+            return false;
+        }
+        int matched = 0;
+        int requiredModelTokens = 0;
+        int matchedRequiredModelTokens = 0;
+        for (String token : tokens) {
+            boolean contains = normalizedTitle.contains(token);
+            if (contains) {
+                matched += 1;
+            }
+            if (isModelToken(token)) {
+                requiredModelTokens += 1;
+                if (contains) {
+                    matchedRequiredModelTokens += 1;
+                }
+            }
+        }
+        if (requiredModelTokens > 0 && matchedRequiredModelTokens < requiredModelTokens) {
+            return false;
+        }
+        double coverage = matched / (double) tokens.size();
+        return coverage >= 0.6;
+    }
+
+    private static int offerMatchScore(String name, String manufacturer, Map<String, Object> offer) {
+        String title = stringValue(offer.get("title"));
+        String normalizedTitle = normalizeForMatch(title);
+        String normalizedName = normalizeForMatch(name);
+        List<String> tokens = importantTokens(name);
+        int matched = 0;
+        for (String token : tokens) {
+            if (normalizedTitle.contains(token)) {
+                matched += 1;
+            }
+        }
+        int score = matched * 10;
+        if (StringUtils.hasText(normalizedName) && normalizedTitle.contains(normalizedName)) {
+            score += 40;
+        }
+        String normalizedManufacturer = normalizeForMatch(manufacturer);
+        if (StringUtils.hasText(normalizedManufacturer) && normalizedTitle.contains(normalizedManufacturer)) {
+            score += 10;
+        }
+        Object rawPayload = offer.get("rawPayload");
+        if (rawPayload instanceof Map<?, ?> payload && "1".equals(stringValue(payload.get("productType")))) {
+            score += 30;
+        }
+        String supplierName = normalizeForMatch(stringValue(offer.get("supplierName")));
+        if ("네이버".equals(supplierName)) {
+            score += 20;
+        }
+        return score;
+    }
+
+    private static boolean hasOptionConflict(String category, String normalizedName, String normalizedTitle) {
+        if (normalizedName.contains("화이트") && normalizedTitle.contains("블랙")) {
+            return true;
+        }
+        if (normalizedName.contains("블랙") && normalizedTitle.contains("화이트")) {
+            return true;
+        }
+        if (!normalizedName.contains("LCD") && normalizedTitle.contains("LCD")) {
+            return true;
+        }
+        if (!normalizedName.contains("LBC") && normalizedTitle.contains("LBC")) {
+            return true;
+        }
+        if (!normalizedName.contains("HBC") && normalizedTitle.contains("HBC")) {
+            return true;
+        }
+        if (!normalizedName.contains("PINK") && normalizedTitle.contains("PINK")) {
+            return true;
+        }
+        if (!normalizedName.contains("세트") && !normalizedName.contains("패키지") && !normalizedName.contains("번들")
+                && (normalizedTitle.contains("세트") || normalizedTitle.contains("패키지") || normalizedTitle.contains("번들") || normalizedTitle.contains("+"))) {
+            return true;
+        }
+        if ("CPU".equals(category) && !normalizedName.contains("메인보드")
+                && (normalizedTitle.contains("메인보드") || normalizedTitle.contains("마더보드"))) {
+            return true;
+        }
+        return "CASE".equals(category) && !normalizedName.contains("PSU") && normalizedTitle.contains("PSU");
+    }
+
+    private static List<String> importantTokens(String value) {
+        String normalized = normalizeForMatch(value);
+        if (!StringUtils.hasText(normalized)) {
+            return List.of();
+        }
+        List<String> tokens = new ArrayList<>();
+        for (String token : normalized.split(" ")) {
+            if (token.length() < 2 || MATCH_STOPWORDS.contains(token)) {
+                continue;
+            }
+            tokens.add(token);
+        }
+        return tokens;
+    }
+
+    private static boolean isModelToken(String token) {
+        return token.length() >= 3 && token.matches(".*\\d.*");
+    }
+
+    private static String normalizeForMatch(String value) {
+        String cleaned = cleanText(value);
+        if (!StringUtils.hasText(cleaned)) {
+            return "";
+        }
+        return cleaned
+                .toUpperCase(Locale.ROOT)
+                .replaceAll("[^0-9A-Z가-힣]+", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
     }
 
     private static String manufacturerGuess(Map<?, ?> item) {
@@ -1136,6 +1334,10 @@ public class NaverShoppingOfferService {
 
     private static String blankToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private static int numberValue(Object value) {
+        return value instanceof Number number ? number.intValue() : 0;
     }
 
     private static String limited(String value, int maxLength) {

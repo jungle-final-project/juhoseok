@@ -40,3 +40,9 @@ openai:
   base-url: ${OPENAI_BASE_URL:https://api.openai.com/v1}
   api-key: ${OPENAI_API_KEY:}
   model: ${OPENAI_MODEL:gpt-4.1-mini}
+
+part:
+  price-refresh:
+    enabled: ${PART_PRICE_REFRESH_ENABLED:true}
+    cron: "${PART_PRICE_REFRESH_CRON:0 0 4 * * *}"
+    zone: "${PART_PRICE_REFRESH_ZONE:Asia/Seoul}"

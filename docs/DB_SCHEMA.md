@@ -924,11 +924,11 @@ JSONB 금지 대상:
 
 네이버 쇼핑 검색 갱신 작업이 `part_external_offers.low_price`를 저장하면 같은 가격을 `parts.price`에 동기화하고 `price_snapshots`에도 `NAVER_SHOPPING_SEARCH` 이력으로 남긴다. 따라서 `/api/parts`의 가격, 가격 정렬, 가격 필터, 목표가 알림의 현재가는 모두 마지막으로 저장된 외부 검색 가격이 우선 기준이다. 사용자 조회 API는 실시간 검색 API를 직접 호출하지 않고 저장된 값을 읽는다.
 
-상품별 가격변동 추이는 `price_snapshots` 누적 데이터가 기준이다. 네이버 쇼핑 검색 API는 현재 검색 결과를 가져오는 용도이고 과거 가격 이력을 소급 제공하는 계약으로 보지 않는다. 따라서 관리자 갱신 작업을 주기적으로 실행해 현재가를 계속 snapshot으로 쌓고, `GET /api/parts/{id}/price-history`가 이 누적 이력을 조회한다.
+상품별 가격변동 추이는 `price_snapshots` 누적 데이터가 기준이다. 네이버 쇼핑 검색 API는 현재 검색 결과를 가져오는 용도이고 과거 가격 이력을 소급 제공하는 계약으로 보지 않는다. 따라서 관리자 갱신 작업 또는 서버 일일 스케줄러가 현재가를 계속 snapshot으로 쌓고, `GET /api/parts/{id}/price-history`가 이 누적 이력을 조회한다. 기본 갱신 정책은 최근 1일 안에 갱신된 `part_external_offers` row를 재호출하지 않는 방식이다.
 
 `/api/parts`와 `/api/parts/{id}`는 외부 검색 API를 직접 호출하지 않는다. 내부 자산 최신화는 `part_catalog_refresh_jobs` 작업이 외부 API를 호출해 `part_catalog_candidates`를 채운 뒤, 게시된 후보를 `parts`에 반영하는 방식으로 수행한다. 사용자 화면은 마지막으로 저장된 `parts`와 `part_external_offers` row만 읽는다.
 
-카테고리별 대량 갱신은 query pack을 사용한다. GPU, MOTHERBOARD, PSU처럼 제조사와 라인업이 많은 category는 한 검색어에 의존하지 않고 여러 모델/제조사 검색어를 나눠 후보를 수십 개 이상 확보한다.
+카테고리별 대량 갱신은 query pack을 사용한다. GPU, MOTHERBOARD, PSU, COOLER처럼 제조사와 라인업이 많은 category는 한 검색어에 의존하지 않고 여러 모델/제조사 검색어를 나눠 후보를 수십 개 이상 확보한다.
 
 쇼핑몰 기본 목록은 `parts.status = 'ACTIVE'`인 row만 노출한다. 구형 seed나 기준에서 제외된 자산은 `INACTIVE`로 보관하고, 관리자나 점검 목적에서만 명시적으로 조회한다.
 
@@ -1139,6 +1139,13 @@ V13__part_psu_capacity_enrichment.sql
 V14__part_spec_confidence_normalization.sql
 V15__part_manual_verified_specs.sql
 V16__sync_parts_price_from_external_offers.sql
+V17__current_cooler_lineup_seed.sql
+V18__curated_cooler_external_offers.sql
+V19__collected_parts_catalog_snapshot.sql
+V20__budget_psu_wattage_catalog_seed.sql
+V21__official_spec_option_gap_seed.sql
+V22__gpu_tool_dimension_seed.sql
+V23__team_shared_naver_offer_price_seed.sql
 ```
 
 현재 저장소에는 위 순서의 Flyway migration이 반영되어 있다. 기존 PostgreSQL volume이 남아 있으면 새 migration과 seed가 다시 실행되지 않으므로, 공통 DB를 처음부터 검증할 때는 `docker compose down -v` 후 `docker compose up --build`를 사용한다.

@@ -62,6 +62,9 @@ services:
       NAVER_SEARCH_CLIENT_ID: ${NAVER_SEARCH_CLIENT_ID:-}
       NAVER_SEARCH_CLIENT_SECRET: ${NAVER_SEARCH_CLIENT_SECRET:-}
       NAVER_SEARCH_BASE_URL: ${NAVER_SEARCH_BASE_URL:-https://openapi.naver.com}
+      PART_PRICE_REFRESH_ENABLED: ${PART_PRICE_REFRESH_ENABLED:-true}
+      PART_PRICE_REFRESH_CRON: "${PART_PRICE_REFRESH_CRON:-0 0 4 * * *}"
+      PART_PRICE_REFRESH_ZONE: ${PART_PRICE_REFRESH_ZONE:-Asia/Seoul}
     depends_on:
       postgres:
         condition: service_healthy

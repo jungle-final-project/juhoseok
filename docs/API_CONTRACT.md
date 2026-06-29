@@ -198,11 +198,11 @@ Google OAuth 정책:
 
 네이버 쇼핑 검색 API 키가 설정된 환경에서도 `/api/parts`와 `/api/parts/{id}`는 외부 API를 직접 호출하지 않는다. 내부 자산 최신화는 `POST /api/admin/parts/catalog/refresh`가 담당한다. 이 API는 카테고리별 query pack을 돌려 `part_catalog_candidates`에 후보를 저장하고, `publish=true`일 때 검증 가능한 후보를 `parts`에 게시한다. 사용자 화면은 저장된 `parts`만 읽는다.
 
-상품 사진/공급업체/현재가 보강은 `POST /api/admin/parts/external-offers/refresh`가 담당한다. 검색 결과는 `part_external_offers`에 저장하고, `low_price`가 있으면 `parts.price`와 `price_snapshots`에도 같은 가격을 반영한다. 캐시가 없거나 갱신 실패 시 `externalOffer`는 `null`이다. 네이버 API 키는 프론트로 전달하지 않고 API 서버 환경변수로만 관리한다.
+상품 사진/공급업체/현재가 보강은 `POST /api/admin/parts/external-offers/refresh`가 담당한다. 검색 결과는 `part_external_offers`에 저장하고, `low_price`가 있으면 `parts.price`와 `price_snapshots`에도 같은 가격을 반영한다. 캐시가 없거나 갱신 실패 시 `externalOffer`는 `null`이다. 네이버 API 키는 프론트로 전달하지 않고 API 서버 환경변수로만 관리한다. `force=true`가 없으면 최근 1일 안에 갱신된 상품은 재호출하지 않는다. 서버 자동 갱신은 기본값 기준 한국시간 매일 04:00에 같은 1일 기준으로 실행된다.
 
 상품별 가격변동 추이는 `GET /api/parts/{id}/price-history`로 조회한다. 이 API는 저장된 `price_snapshots`만 읽고 외부 검색 API를 실시간 호출하지 않는다. 사용자 화면의 간단한 추이 표시는 `source=NAVER_SHOPPING_SEARCH`를 지정해 네이버 갱신 이력만 사용하고, 관리자/분석 용도에서는 source를 생략해 전체 source를 비교할 수 있다.
 
-`POST /api/admin/parts/catalog/refresh`의 기본 query pack은 카테고리별로 수십 개 후보를 확보하도록 설계한다. GPU는 RTX 5090/5080/5070 Ti/5070/5060 Ti/5060을 ASUS, MSI, GIGABYTE, ZOTAC, PNY 등 제조사 검색어로 나누고, MOTHERBOARD와 PSU도 최신 소켓/칩셋/ATX 3.1 기준 제조사별 검색어를 사용한다.
+`POST /api/admin/parts/catalog/refresh`의 기본 query pack은 카테고리별로 수십 개 후보를 확보하도록 설계한다. GPU는 RTX 5090/5080/5070 Ti/5070/5060 Ti/5060을 ASUS, MSI, GIGABYTE, ZOTAC, PNY 등 제조사 검색어로 나누고, MOTHERBOARD와 PSU도 최신 소켓/칩셋/ATX 3.1 기준 제조사별 검색어를 사용한다. COOLER는 주요 공랭 듀얼타워와 360mm AIO 제품군을 별도 query pack으로 관리한다.
 
 ### Tool
 

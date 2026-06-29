@@ -81,6 +81,7 @@ public class PartQueryService {
                           SELECT snapshot.source, snapshot.collected_at
                           FROM price_snapshots snapshot
                           WHERE snapshot.part_id = p.id
+                            AND snapshot.collected_at <= now()
                           ORDER BY snapshot.collected_at DESC, snapshot.id DESC
                           LIMIT 1
                         ) ps ON true
@@ -120,6 +121,7 @@ public class PartQueryService {
                           FROM price_snapshots ps
                           WHERE ps.part_id = ?
                             AND ps.collected_at >= now() - (? * interval '1 day')
+                            AND ps.collected_at <= now()
                         """ + sourceFilter + """
                           ORDER BY ps.collected_at DESC, ps.id DESC
                           LIMIT ?
@@ -142,6 +144,7 @@ public class PartQueryService {
 
     public Map<String, Object> toolResult(String toolName) {
         Map<String, Object> rule = ruleFor(toolName);
+        String category = categoryForTool(toolName);
         String status = rule == null ? defaultStatus(toolName) : DbValueMapper.string(rule, "status");
         String summary = rule == null ? "DB seed result for " + toolName : DbValueMapper.string(rule, "summary");
         return MockData.map(
@@ -149,7 +152,8 @@ public class PartQueryService {
                 "confidence", "MEDIUM",
                 "summary", summary,
                 "details", MockData.map(
-                        "checkedPartIds", partRows(PartSearch.defaults()).stream().limit(3).map(part -> part.get("id")).toList(),
+                        "checkedPartIds", toolReadyPartIds(category, 3),
+                        "candidateCategory", category,
                         "source", "db-seed",
                         "toolName", toolName
                 )
@@ -199,6 +203,7 @@ public class PartQueryService {
                           SELECT snapshot.source, snapshot.collected_at
                           FROM price_snapshots snapshot
                           WHERE snapshot.part_id = p.id
+                            AND snapshot.collected_at <= now()
                           ORDER BY snapshot.collected_at DESC, snapshot.id DESC
                           LIMIT 1
                         ) ps ON true
@@ -379,14 +384,7 @@ public class PartQueryService {
     }
 
     private Map<String, Object> ruleFor(String toolName) {
-        String category = switch (toolName) {
-            case "compatibility" -> "CPU";
-            case "size" -> "GPU";
-            case "power" -> "PSU";
-            case "performance" -> "GPU";
-            case "price" -> "GPU";
-            default -> "CPU";
-        };
+        String category = categoryForTool(toolName);
         List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
                 SELECT result_status AS status, message AS summary
                 FROM compatibility_rules
@@ -396,6 +394,30 @@ public class PartQueryService {
                 LIMIT 1
                 """, category);
         return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    private List<String> toolReadyPartIds(String category, int limit) {
+        return jdbcTemplate.queryForList("""
+                SELECT public_id::text
+                FROM parts
+                WHERE category = ?
+                  AND status = 'ACTIVE'
+                  AND deleted_at IS NULL
+                  AND coalesce((attributes->>'toolReady')::boolean, false) = true
+                ORDER BY price ASC, id ASC
+                LIMIT ?
+                """, String.class, category, limit);
+    }
+
+    private static String categoryForTool(String toolName) {
+        return switch (toolName) {
+            case "compatibility" -> "CPU";
+            case "size" -> "GPU";
+            case "power" -> "PSU";
+            case "performance" -> "GPU";
+            case "price" -> "GPU";
+            default -> "CPU";
+        };
     }
 
     private static String defaultStatus(String toolName) {
@@ -444,7 +466,7 @@ public class PartQueryService {
         }
 
         static PartSearch defaults() {
-            return new PartSearch(null, null, null, null, null, null, 0, 20, null);
+            return new PartSearch(null, null, null, null, null, null, Integer.valueOf(0), Integer.valueOf(20), null);
         }
 
         int offset() {

@@ -1,13 +1,16 @@
 package com.buildgraph.prototype.part;
 
 import java.util.Map;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 @RequestMapping("/api")
@@ -54,8 +57,10 @@ public class PartController {
     Map<String, Object> refreshExternalOffers(
             @RequestParam(value = "category", required = false) String category,
             @RequestParam(value = "limit", required = false) Integer limit,
-            @RequestParam(value = "force", required = false) Boolean force
+            @RequestParam(value = "force", required = false) Boolean force,
+            @RequestHeader(value = "Authorization", required = false) String authorization
     ) {
+        requireAdmin(authorization);
         return naverShoppingOfferService.refreshOffers(category, limit, force);
     }
 
@@ -64,8 +69,10 @@ public class PartController {
             @RequestParam(value = "category") String category,
             @RequestParam(value = "limitPerQuery", required = false) Integer limitPerQuery,
             @RequestParam(value = "publish", required = false) Boolean publish,
-            @RequestParam(value = "q", required = false) String query
+            @RequestParam(value = "q", required = false) String query,
+            @RequestHeader(value = "Authorization", required = false) String authorization
     ) {
+        requireAdmin(authorization);
         return naverShoppingOfferService.refreshCatalog(category, limitPerQuery, publish, query);
     }
 
@@ -96,5 +103,14 @@ public class PartController {
 
     private Map<String, Object> tool(String tool, Map<String, Object> request) {
         return partQueryService.toolResult(tool);
+    }
+
+    private static void requireAdmin(String authorization) {
+        if (authorization == null || !authorization.startsWith("Bearer demo-access-")) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "로그인이 필요합니다.");
+        }
+        if (!authorization.contains("demo-access-admin")) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "관리자 권한이 필요합니다.");
+        }
     }
 }

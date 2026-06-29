@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { CategorySidebar, DataTable, MetricCard, Panel, Screen, StatusBadge } from '../../../components/ui';
+import { CategorySidebar, DataTable, MetricCard, Panel, Screen } from '../../../components/ui';
 import { getPartPriceHistory, listParts } from '../partsApi';
 import type { PartRow, PartSearchParams } from '../types';
 
@@ -17,28 +17,50 @@ const selfQuoteCategories = [
   { label: '쿨러', value: 'COOLER' }
 ];
 
+const PAGE_SIZE = 20;
+
 export function SelfQuotePage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [category, setCategory] = useState<string>(() => normalizeCategory(searchParams.get('category')));
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<PartSearchParams['sort']>('category');
+  const [page, setPage] = useState(() => normalizePage(searchParams.get('page')));
   const [selectedParts, setSelectedParts] = useState<PartRow[]>([]);
   const { data, isError, isLoading } = useQuery({
-    queryKey: ['parts', 'self-quote', category, query, sort],
-    queryFn: () => listParts({ category, q: query, size: 100, sort })
+    queryKey: ['parts', 'self-quote', category, query, sort, page],
+    queryFn: () => listParts({ category, q: query, page, size: PAGE_SIZE, sort }),
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: true
   });
   const parts = data?.items ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages - 1);
+  const fromIndex = total === 0 ? 0 : safePage * PAGE_SIZE + 1;
+  const toIndex = total === 0 ? 0 : Math.min((safePage + 1) * PAGE_SIZE, total);
   const selectedTotal = selectedParts.reduce((sum, part) => sum + part.price, 0);
   const selectedPartIds = new Set(selectedParts.map((part) => part.id));
 
   useEffect(() => {
     const nextCategory = normalizeCategory(searchParams.get('category'));
     setCategory((current) => current === nextCategory ? current : nextCategory);
+    const nextPage = normalizePage(searchParams.get('page'));
+    setPage((current) => current === nextPage ? current : nextPage);
   }, [searchParams]);
+
+  useEffect(() => {
+    if (parts.length === 0) {
+      return;
+    }
+    setSelectedParts((current) => current.map((selectedPart) => (
+      parts.find((part) => part.id === selectedPart.id) ?? selectedPart
+    )));
+  }, [parts]);
 
   const selectCategory = (nextCategory: string) => {
     const normalizedCategory = normalizeCategory(nextCategory);
     setCategory(normalizedCategory);
+    setPage(0);
     setSearchParams((current) => {
       const nextParams = new URLSearchParams(current);
       if (normalizedCategory) {
@@ -46,9 +68,51 @@ export function SelfQuotePage() {
       } else {
         nextParams.delete('category');
       }
+      nextParams.delete('page');
       return nextParams;
     });
   };
+
+  const updateQuery = (nextQuery: string) => {
+    setQuery(nextQuery);
+    setPage(0);
+    setSearchParams((current) => {
+      const nextParams = new URLSearchParams(current);
+      nextParams.delete('page');
+      return nextParams;
+    });
+  };
+
+  const updateSort = (nextSort: PartSearchParams['sort']) => {
+    setSort(nextSort);
+    setPage(0);
+    setSearchParams((current) => {
+      const nextParams = new URLSearchParams(current);
+      nextParams.delete('page');
+      return nextParams;
+    });
+  };
+
+  const movePage = useCallback((nextPage: number) => {
+    const normalizedPage = Math.min(Math.max(nextPage, 0), totalPages - 1);
+    setPage(normalizedPage);
+    setSearchParams((current) => {
+      const nextParams = new URLSearchParams(current);
+      if (normalizedPage === 0) {
+        nextParams.delete('page');
+      } else {
+        nextParams.set('page', String(normalizedPage));
+      }
+      return nextParams;
+    });
+  }, [setSearchParams, totalPages]);
+
+  useEffect(() => {
+    if (!data || page === safePage) {
+      return;
+    }
+    movePage(safePage);
+  }, [data, movePage, page, safePage]);
 
   const addPart = (part: PartRow) => {
     setSelectedParts((current) => current.some((item) => item.id === part.id) ? current : [...current, part]);
@@ -64,21 +128,45 @@ export function SelfQuotePage() {
         <CategorySidebar items={selfQuoteCategories} activeValue={category} onSelect={selectCategory} />
         <Panel title={categoryLabel(category)} subtitle="왼쪽 카테고리를 누르면 내부 부품 DB 후보가 여기에 나열됩니다.">
           <div className="mb-4 grid grid-cols-[1fr_160px_140px] gap-3">
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="부품명, 제조사, 사양 검색" className="rounded border border-slate-300 px-3 py-2 text-sm" />
-            <select aria-label="정렬 기준" value={sort} onChange={(event) => setSort(event.target.value as PartSearchParams['sort'])} className="rounded border border-slate-300 px-3 py-2 text-sm">
+            <input value={query} onChange={(event) => updateQuery(event.target.value)} placeholder="부품명, 제조사, 사양 검색" className="rounded border border-slate-300 px-3 py-2 text-sm" />
+            <select aria-label="정렬 기준" value={sort} onChange={(event) => updateSort(event.target.value as PartSearchParams['sort'])} className="rounded border border-slate-300 px-3 py-2 text-sm">
               <option value="category">카테고리순</option>
               <option value="price_asc">가격 낮은순</option>
               <option value="price_desc">가격 높은순</option>
               <option value="name">이름순</option>
             </select>
-            <button type="button" onClick={() => { selectCategory(''); setQuery(''); }} className="rounded border border-slate-300 px-3 py-2 text-sm font-bold text-slate-700 hover:border-brand-blue hover:text-brand-blue">
+            <button type="button" onClick={() => { selectCategory(''); updateQuery(''); }} className="rounded border border-slate-300 px-3 py-2 text-sm font-bold text-slate-700 hover:border-brand-blue hover:text-brand-blue">
               전체 보기
             </button>
           </div>
           {isLoading ? <div className="rounded border border-slate-200 p-5 text-sm text-slate-500">부품 목록을 불러오는 중입니다.</div> : null}
           {isError ? <div className="rounded border border-orange-200 bg-orange-50 p-5 text-sm text-orange-700">부품 목록 API를 불러오지 못했습니다.</div> : null}
           {!isLoading && !isError ? (
-            <DataTable columns={['product', 'manufacturer', 'supplier', 'price', 'status', 'score', 'action']} rows={partRows(parts, selectedPartIds, addPart)} />
+            <>
+              <div className="mb-3 flex items-center justify-between text-xs text-slate-500">
+                <span>{total.toLocaleString()}개 중 {fromIndex.toLocaleString()}-{toIndex.toLocaleString()}개 표시</span>
+                <span>페이지 {safePage + 1} / {totalPages}</span>
+              </div>
+              <DataTable columns={['product', 'manufacturer', 'supplier', 'price', 'action']} rows={partRows(parts, selectedPartIds, addPart)} />
+              <div className="mt-4 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => movePage(safePage - 1)}
+                  disabled={safePage === 0}
+                  className="rounded border border-slate-300 px-3 py-2 text-sm font-bold text-slate-700 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-300"
+                >
+                  이전
+                </button>
+                <button
+                  type="button"
+                  onClick={() => movePage(safePage + 1)}
+                  disabled={safePage >= totalPages - 1}
+                  className="rounded border border-slate-300 px-3 py-2 text-sm font-bold text-slate-700 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-300"
+                >
+                  다음
+                </button>
+              </div>
+            </>
           ) : null}
         </Panel>
         <Panel title="내 견적 / 검증">
@@ -118,8 +206,6 @@ function partRows(parts: PartRow[], selectedPartIds: Set<string>, onAddPart: (pa
     manufacturer: part.manufacturer ?? '-',
     supplier: <SupplierCell part={part} />,
     price: `${part.price.toLocaleString()}원`,
-    status: <StatusBadge status={part.status} />,
-    score: formatScore(part.benchmarkSummary?.score),
     action: (
       <button
         type="button"
@@ -203,11 +289,12 @@ function normalizeCategory(category: string | null) {
   return selfQuoteCategories.some((entry) => entry.value === category) ? category ?? '' : '';
 }
 
-function formatScore(score?: number | string) {
-  if (score === undefined || score === null) {
-    return '-';
+function normalizePage(page: string | null) {
+  if (!page) {
+    return 0;
   }
-  return typeof score === 'number' ? score.toFixed(1) : score;
+  const parsed = Number.parseInt(page, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }
 
 function partShortSpec(part: PartRow) {
