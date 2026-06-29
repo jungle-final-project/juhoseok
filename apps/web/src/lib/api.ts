@@ -1,5 +1,14 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
 
+function apiUrl(path: string) {
+  const baseUrl = API_BASE_URL.replace(/\/$/, '');
+  if (!baseUrl) return path;
+  if (baseUrl.endsWith('/api') && path.startsWith('/api/')) {
+    return `${baseUrl}${path.slice('/api'.length)}`;
+  }
+  return `${baseUrl}${path}`;
+}
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
@@ -17,7 +26,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (token) headers.set('Authorization', `Bearer ${token}`);
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(apiUrl(path), {
     ...init,
     headers
   });

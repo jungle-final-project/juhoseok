@@ -1,0 +1,295 @@
+name: CD Production
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+    branches:
+      - main
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy production
+    runs-on: ubuntu-latest
+    environment: production
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main'
+    env:
+      DEPLOY_SHA: ${{ github.event.workflow_run.head_sha }}
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+      ECR_API_REPOSITORY: ${{ vars.ECR_API_REPOSITORY }}
+      ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+      ECS_SERVICE_API: ${{ vars.ECS_SERVICE_API }}
+      ECS_CONTAINER_NAME_API: ${{ vars.ECS_CONTAINER_NAME_API }}
+      WEB_S3_BUCKET: ${{ vars.WEB_S3_BUCKET }}
+      CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
+      VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+
+    steps:
+      - name: Checkout verified commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Validate production variables
+        shell: bash
+        run: |
+          set -euo pipefail
+          required_vars=(
+            AWS_REGION
+            AWS_ROLE_ARN
+            ECR_API_REPOSITORY
+            ECS_CLUSTER
+            ECS_SERVICE_API
+            ECS_CONTAINER_NAME_API
+            WEB_S3_BUCKET
+            CLOUDFRONT_DISTRIBUTION_ID
+          )
+          for var_name in "${required_vars[@]}"; do
+            if [ -z "${!var_name:-}" ]; then
+              echo "Missing GitHub production variable: ${var_name}" >&2
+              exit 1
+            fi
+          done
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push API image
+        id: api-image
+        shell: bash
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+        run: |
+          set -euo pipefail
+          api_image="${ECR_REGISTRY}/${ECR_API_REPOSITORY}:${DEPLOY_SHA}"
+          docker build -t "${api_image}" ./apps/api
+          docker push "${api_image}"
+          echo "image=${api_image}" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch current API task definition
+        id: current-task
+        shell: bash
+        run: |
+          set -euo pipefail
+          task_definition_arn="$(aws ecs describe-services \
+            --cluster "${ECS_CLUSTER}" \
+            --services "${ECS_SERVICE_API}" \
+            --query 'services[0].taskDefinition' \
+            --output text)"
+          if [ -z "${task_definition_arn}" ] || [ "${task_definition_arn}" = "None" ]; then
+            echo "Could not resolve current task definition for ${ECS_SERVICE_API}" >&2
+            exit 1
+          fi
+          aws ecs describe-task-definition \
+            --task-definition "${task_definition_arn}" \
+            --query 'taskDefinition' > task-definition-current.json
+          echo "arn=${task_definition_arn}" >> "$GITHUB_OUTPUT"
+
+      - name: Register API task definition
+        id: task-def
+        shell: bash
+        env:
+          API_IMAGE: ${{ steps.api-image.outputs.image }}
+        run: |
+          set -euo pipefail
+          jq -e --arg name "${ECS_CONTAINER_NAME_API}" \
+            '.containerDefinitions | any(.name == $name)' task-definition-current.json > /dev/null
+          jq --arg name "${ECS_CONTAINER_NAME_API}" --arg image "${API_IMAGE}" '
+            .containerDefinitions |= map(
+              if .name == $name then .image = $image else . end
+            )
+            | del(
+              .taskDefinitionArn,
+              .revision,
+              .status,
+              .requiresAttributes,
+              .compatibilities,
+              .registeredAt,
+              .registeredBy
+            )
+          ' task-definition-current.json > task-definition-api.json
+          new_task_definition_arn="$(aws ecs register-task-definition \
+            --cli-input-json file://task-definition-api.json \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)"
+          echo "arn=${new_task_definition_arn}" >> "$GITHUB_OUTPUT"
+
+      - name: Run Flyway migration task
+        id: migration
+        shell: bash
+        env:
+          TASK_DEFINITION_ARN: ${{ steps.task-def.outputs.arn }}
+        run: |
+          set -euo pipefail
+          aws ecs describe-services \
+            --cluster "${ECS_CLUSTER}" \
+            --services "${ECS_SERVICE_API}" \
+            --query 'services[0].networkConfiguration.awsvpcConfiguration' > awsvpc.json
+          subnets="$(jq -r '.subnets | join(",")' awsvpc.json)"
+          security_groups="$(jq -r '.securityGroups | join(",")' awsvpc.json)"
+          assign_public_ip="$(jq -r '.assignPublicIp // "DISABLED"' awsvpc.json)"
+          if [ -z "${subnets}" ] || [ -z "${security_groups}" ]; then
+            echo "ECS service must use awsvpc subnets and security groups for migration task reuse." >&2
+            exit 1
+          fi
+          jq -n --arg name "${ECS_CONTAINER_NAME_API}" '{
+            containerOverrides: [
+              {
+                name: $name,
+                command: [
+                  "java",
+                  "-jar",
+                  "/app/app.jar",
+                  "--spring.main.web-application-type=none",
+                  "--server.port=0"
+                ],
+                environment: [
+                  { name: "SPRING_FLYWAY_ENABLED", value: "true" },
+                  { name: "PART_PRICE_REFRESH_ENABLED", value: "false" }
+                ]
+              }
+            ]
+          }' > migration-overrides.json
+          migration_task_arn="$(aws ecs run-task \
+            --cluster "${ECS_CLUSTER}" \
+            --launch-type FARGATE \
+            --task-definition "${TASK_DEFINITION_ARN}" \
+            --network-configuration "awsvpcConfiguration={subnets=[${subnets}],securityGroups=[${security_groups}],assignPublicIp=${assign_public_ip}}" \
+            --overrides file://migration-overrides.json \
+            --query 'tasks[0].taskArn' \
+            --output text)"
+          if [ -z "${migration_task_arn}" ] || [ "${migration_task_arn}" = "None" ]; then
+            echo "Failed to start migration task." >&2
+            aws ecs run-task \
+              --cluster "${ECS_CLUSTER}" \
+              --launch-type FARGATE \
+              --task-definition "${TASK_DEFINITION_ARN}" \
+              --network-configuration "awsvpcConfiguration={subnets=[${subnets}],securityGroups=[${security_groups}],assignPublicIp=${assign_public_ip}}" \
+              --overrides file://migration-overrides.json || true
+            exit 1
+          fi
+          aws ecs wait tasks-stopped --cluster "${ECS_CLUSTER}" --tasks "${migration_task_arn}"
+          exit_code="$(aws ecs describe-tasks \
+            --cluster "${ECS_CLUSTER}" \
+            --tasks "${migration_task_arn}" \
+            --query "tasks[0].containers[?name=='${ECS_CONTAINER_NAME_API}'].exitCode | [0]" \
+            --output text)"
+          if [ "${exit_code}" != "0" ]; then
+            aws ecs describe-tasks --cluster "${ECS_CLUSTER}" --tasks "${migration_task_arn}"
+            exit 1
+          fi
+          echo "task=${migration_task_arn}" >> "$GITHUB_OUTPUT"
+
+      - name: Update API service
+        shell: bash
+        env:
+          TASK_DEFINITION_ARN: ${{ steps.task-def.outputs.arn }}
+        run: |
+          set -euo pipefail
+          aws ecs update-service \
+            --cluster "${ECS_CLUSTER}" \
+            --service "${ECS_SERVICE_API}" \
+            --task-definition "${TASK_DEFINITION_ARN}" > /dev/null
+          aws ecs wait services-stable \
+            --cluster "${ECS_CLUSTER}" \
+            --services "${ECS_SERVICE_API}"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Build web
+        working-directory: apps/web
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build
+
+      - name: Publish web to S3
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws s3 sync apps/web/dist "s3://${WEB_S3_BUCKET}/releases/${DEPLOY_SHA}/" --delete
+          aws s3 sync apps/web/dist "s3://${WEB_S3_BUCKET}/" --delete --exclude "releases/*"
+
+      - name: Invalidate CloudFront
+        id: cloudfront
+        shell: bash
+        run: |
+          set -euo pipefail
+          invalidation_id="$(aws cloudfront create-invalidation \
+            --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" \
+            --paths "/*" \
+            --query 'Invalidation.Id' \
+            --output text)"
+          aws cloudfront wait invalidation-completed \
+            --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" \
+            --id "${invalidation_id}"
+          echo "invalidation=${invalidation_id}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify production health
+        id: health
+        shell: bash
+        run: |
+          set -euo pipefail
+          cloudfront_domain="$(aws cloudfront get-distribution \
+            --id "${CLOUDFRONT_DISTRIBUTION_ID}" \
+            --query 'Distribution.DomainName' \
+            --output text)"
+          health_url="https://${cloudfront_domain}/api/health"
+          for attempt in {1..30}; do
+            if curl -fsS "${health_url}"; then
+              echo "url=${health_url}" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Production health check failed: ${health_url}" >&2
+          exit 1
+
+      - name: Write deployment summary
+        if: always()
+        shell: bash
+        env:
+          API_IMAGE: ${{ steps.api-image.outputs.image }}
+          PREVIOUS_TASK_DEFINITION: ${{ steps.current-task.outputs.arn }}
+          NEW_TASK_DEFINITION: ${{ steps.task-def.outputs.arn }}
+          MIGRATION_TASK: ${{ steps.migration.outputs.task }}
+          HEALTH_URL: ${{ steps.health.outputs.url }}
+          INVALIDATION_ID: ${{ steps.cloudfront.outputs.invalidation }}
+        run: |
+          {
+            echo "### Production deployment"
+            echo "- Commit: ${DEPLOY_SHA}"
+            echo "- API image: ${API_IMAGE:-not-created}"
+            echo "- Previous API task definition: ${PREVIOUS_TASK_DEFINITION:-not-resolved}"
+            echo "- New API task definition: ${NEW_TASK_DEFINITION:-not-registered}"
+            echo "- Migration task: ${MIGRATION_TASK:-not-run}"
+            echo "- Web release: s3://${WEB_S3_BUCKET}/releases/${DEPLOY_SHA}/"
+            echo "- CloudFront invalidation: ${INVALIDATION_ID:-not-created}"
+            echo "- Health check: ${HEALTH_URL:-not-run}"
+          } >> "$GITHUB_STEP_SUMMARY"

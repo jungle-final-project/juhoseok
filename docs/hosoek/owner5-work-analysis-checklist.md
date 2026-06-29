@@ -461,6 +461,14 @@ AdminShell nav 분석 결과:
 - [x] `README.md`와 `ROUTE_OWNERSHIP.md`는 Auth/User 구현 owner 1번 기준과 2번의 parts/catalog refresh 확장 기준을 함께 반영했다.
 - [x] 충돌 marker 제거 후 `npm --prefix apps/web run build`와 `git diff --check`가 통과했다.
 
+#### Production CD 작업 기록
+
+- [x] `main` CI 성공 이후 AWS production 배포를 실행하는 `CD Production` workflow 초안을 추가했다.
+- [x] GitHub OIDC 기반 AWS Role assume, API image ECR push, ECS task definition image 교체, migration one-off task, ECS service update, S3/CloudFront web 배포 흐름을 README에 기록했다.
+- [x] 운영 API service와 migration task를 분리하기 위해 `SPRING_FLYWAY_ENABLED` 환경 변수를 추가했다.
+- [x] production CloudFront/S3/ALB 구성을 위해 `APP_CORS_ALLOWED_ORIGINS`와 `VITE_API_BASE_URL` 환경 변수 기준을 추가했다.
+- [x] CORS 기본 localhost origin과 production origin override 동작을 `CorsConfigTest`로 검증한다.
+
 ## 우선순위
 
 ### P0

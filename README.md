@@ -370,4 +370,52 @@ CI 실패 시 먼저 확인할 GitHub Actions step:
 | `Validate Docker Compose` | `compose.yaml` 문법, service, volume, port 설정 오류 |
 | `Run API runtime smoke test` | PostgreSQL health, API jar 실행, `/api/health` DB 연결 오류 |
 
-CI가 안정적으로 통과하면 다음 단계로 Docker image build 검증을 추가합니다. 이 단계는 이미지를 registry에 push하지 않고 `docker build`만 실행해 Dockerfile이 깨졌는지 확인합니다. CD와 AWS 배포 자동화는 CI가 안정화된 뒤 별도 workflow로 설계합니다.
+CI는 API/web Docker image build까지 확인하지만 registry push는 하지 않습니다. AWS production 배포는 아래 `CD Production` workflow가 CI 성공 이후 별도로 수행합니다.
+
+## Production CD
+
+`main` push에서 CI가 성공하면 `CD Production` workflow가 자동으로 AWS production 환경에 배포합니다.
+
+배포 흐름:
+
+1. GitHub OIDC로 AWS IAM Role을 assume합니다.
+2. API Docker image를 ECR에 commit SHA tag로 push합니다.
+3. 현재 ECS API service의 task definition을 조회하고 API container image만 새 image로 교체해 새 revision을 등록합니다.
+4. 새 task definition으로 ECS one-off migration task를 실행합니다.
+5. migration task가 `exitCode=0`이면 ECS API service를 새 task definition으로 업데이트합니다.
+6. web은 `npm run build` 결과를 S3에 `releases/<commit-sha>/`와 현재 루트로 sync합니다.
+7. CloudFront invalidation 후 `https://<cloudfront-domain>/api/health`를 확인합니다.
+
+GitHub `production` Environment Variables:
+
+| 이름 | 설명 |
+| --- | --- |
+| `AWS_REGION` | AWS region |
+| `AWS_ROLE_ARN` | GitHub OIDC가 assume할 IAM Role ARN |
+| `ECR_API_REPOSITORY` | API ECR repository 이름 |
+| `ECS_CLUSTER` | ECS cluster 이름 |
+| `ECS_SERVICE_API` | API ECS service 이름 |
+| `ECS_CONTAINER_NAME_API` | task definition 안의 API container 이름 |
+| `WEB_S3_BUCKET` | web 정적 파일 S3 bucket |
+| `CLOUDFRONT_DISTRIBUTION_ID` | S3 web과 `/api/*` ALB origin을 가진 CloudFront distribution ID |
+| `VITE_API_BASE_URL` | CloudFront 단일 distribution 기준 `/api` |
+
+AWS Console에서 먼저 준비할 리소스:
+
+- ECR repository, ECS Fargate cluster/service/task definition, ALB target group(`/api/health` health check)
+- RDS PostgreSQL, ElastiCache Redis, Amazon MQ RabbitMQ
+- S3 bucket, CloudFront distribution(default S3 origin, `/api/*` ALB origin)
+- AWS Secrets Manager 또는 SSM Parameter Store의 DB/OpenAI/Naver/SES SMTP secret
+- OIDC IAM Role. 최소 권한은 ECR push, ECS task definition register/service update/run-task, S3 sync, CloudFront invalidation, 필요한 `iam:PassRole`입니다.
+
+운영 task 설정:
+
+- API service task에는 `SPRING_FLYWAY_ENABLED=false`를 둡니다.
+- migration one-off task는 workflow override로 `SPRING_FLYWAY_ENABLED=true`, `PART_PRICE_REFRESH_ENABLED=false`를 사용합니다.
+- production CORS가 필요하면 `APP_CORS_ALLOWED_ORIGINS`에 CloudFront origin을 설정합니다. CloudFront 단일 distribution에서 `/api/*`를 같은 origin으로 라우팅하면 브라우저 CORS 부담이 줄어듭니다.
+
+Rollback:
+
+- workflow summary에 이전 ECS task definition ARN, 새 task definition ARN, commit SHA, S3 release 경로를 남깁니다.
+- API rollback은 이전 task definition ARN으로 ECS service를 수동 업데이트합니다.
+- web rollback은 `s3://<bucket>/releases/<previous-sha>/`를 현재 루트로 sync한 뒤 CloudFront invalidation을 실행합니다.
