@@ -61,8 +61,8 @@
 | 4 | RAG 근거 기록 기반 | 완료 | `AgentTraceService.recordRagEvidence`, `AgentRagEvidenceDraft` | 실제 runner에서 호출해 세션별 evidence 생성 |
 | 5 | Tool 호출 기록 기반 | 완료 | `AgentTraceService.recordToolInvocation`, `AgentToolInvocationDraft` | 2번 Tool 결과 DTO와 payload shape 최종 합의 |
 | 6 | Agent 상태 전이 공통화 | 완료 | `AgentTraceService.advanceStatus`, 허용 전이/금지 전이 검증 | runner와 화면에서 상태 전이 결과 사용 |
-| 7 | 목적별 mock Agent runner | 다음 작업 | 목적 프로필 `BUILD_RECOMMEND`, `BUILD_EXPLAIN`, `AS_ANALYZE` 존재 | RAG 기록, Tool 기록, 상태 전이를 한 번에 연결 |
-| 8 | 관리자 Agent 상세 화면 API 연결 | 대기 | 와이어프레임 화면과 route 존재 | mock table을 `GET /api/admin/agent-sessions/{id}` 응답으로 교체 |
+| 7 | 목적별 mock Agent runner | 완료 | `AgentMockRunService`, 목적별 RAG/Tool 기록, `SUCCEEDED` 완료 흐름 | 실제 LLM/RAG 연동 시 교체 가능한 경계 유지 |
+| 8 | 관리자 Agent 상세 화면 API 연결 | 다음 작업 | 와이어프레임 화면과 route 존재 | mock table을 `GET /api/admin/agent-sessions/{id}` 응답으로 교체 |
 | 9 | Tool/RAG 상세 화면 API 연결 | 대기 | 상세 화면 route와 API wrapper 존재 | Tool payload, RAG chunk/metadata/score 실제 표시 |
 | 10 | 테스트와 계약 검증 | 대기 | 기존 build 검증 통과 | backend smoke, frontend route smoke, OpenAPI 검증 |
 | 11 | 협업 인터페이스 문서화 | 대기 | 협업 지점 표 존재 | 1번/2번/4번이 호출할 내부 service 예시 정리 |
