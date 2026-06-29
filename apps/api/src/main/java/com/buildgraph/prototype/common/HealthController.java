@@ -1,6 +1,9 @@
 package com.buildgraph.prototype.common;
 
 import java.util.Map;
+import org.springframework.dao.DataAccessException;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -16,8 +19,15 @@ public class HealthController {
     }
 
     @GetMapping("/health")
-    Map<String, Object> health() {
-        Integer db = jdbcTemplate.queryForObject("select 1", Integer.class);
-        return Map.of("status", "UP", "database", Integer.valueOf(1).equals(db) ? "UP" : "UNKNOWN");
+    ResponseEntity<Map<String, Object>> health() {
+        try {
+            Integer db = jdbcTemplate.queryForObject("select 1", Integer.class);
+            return ResponseEntity.ok(Map.of(
+                    "status", "UP",
+                    "database", Integer.valueOf(1).equals(db) ? "UP" : "UNKNOWN"
+            ));
+        } catch (DataAccessException exception) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("status", "DOWN"));
+        }
     }
 }

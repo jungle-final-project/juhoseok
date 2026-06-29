@@ -10,7 +10,10 @@ spring:
     password: ${SPRING_DATASOURCE_PASSWORD:buildgraph}
   sql:
     init:
-      mode: always
+      mode: never
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
   data:
     redis:
       host: ${SPRING_DATA_REDIS_HOST:localhost}
@@ -28,3 +31,18 @@ management:
     web:
       exposure:
         include: health,info
+
+agent:
+  runner:
+    mode: ${AGENT_RUNNER_MODE:deterministic}
+
+openai:
+  base-url: ${OPENAI_BASE_URL:https://api.openai.com/v1}
+  api-key: ${OPENAI_API_KEY:}
+  model: ${OPENAI_MODEL:gpt-4.1-mini}
+
+part:
+  price-refresh:
+    enabled: ${PART_PRICE_REFRESH_ENABLED:true}
+    cron: "${PART_PRICE_REFRESH_CRON:0 0 4 * * *}"
+    zone: "${PART_PRICE_REFRESH_ZONE:Asia/Seoul}"

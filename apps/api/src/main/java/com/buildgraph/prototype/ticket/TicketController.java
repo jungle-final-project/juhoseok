@@ -13,14 +13,20 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api")
 public class TicketController {
+    private final TicketQueryService ticketQueryService;
+
+    public TicketController(TicketQueryService ticketQueryService) {
+        this.ticketQueryService = ticketQueryService;
+    }
+
     @PostMapping("/as-tickets")
     @ResponseStatus(HttpStatus.CREATED)
     Map<String, Object> create(@RequestBody(required = false) Map<String, Object> request) {
-        return TicketSeed.createTicket();
+        return ticketQueryService.create(request);
     }
 
     @GetMapping("/as-tickets/{id}")
     Map<String, Object> ticket(@PathVariable String id) {
-        return TicketSeed.userTicket(id);
+        return ticketQueryService.ticket(id);
     }
 }

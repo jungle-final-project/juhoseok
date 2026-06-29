@@ -1,0 +1,31 @@
+package com.buildgraph.prototype.agent;
+
+import java.util.List;
+
+public final class AgentRunProfiles {
+    private AgentRunProfiles() {
+    }
+
+    public static AgentRunProfile forRoot(AgentSessionRoot root) {
+        return switch (root.purpose()) {
+            case BUILD_RECOMMEND -> new AgentRunProfile(
+                    AgentPurpose.BUILD_RECOMMEND,
+                    List.of("PART_SPEC", "BENCHMARK", "INTERNAL_RULE"),
+                    List.of("compatibility", "power", "size", "performance", "price"),
+                    "build_recommendation"
+            );
+            case BUILD_EXPLAIN -> new AgentRunProfile(
+                    AgentPurpose.BUILD_EXPLAIN,
+                    List.of("PART_SPEC", "BENCHMARK", "GUIDE", "INTERNAL_RULE"),
+                    List.of("performance", "price"),
+                    "build_explanation"
+            );
+            case AS_ANALYZE -> new AgentRunProfile(
+                    AgentPurpose.AS_ANALYZE,
+                    List.of("TROUBLESHOOTING", "INTERNAL_RULE", "BENCHMARK", "PART_SPEC"),
+                    List.of("performance", "compatibility", "price"),
+                    "as_cause_and_upgrade_candidates"
+            );
+        };
+    }
+}

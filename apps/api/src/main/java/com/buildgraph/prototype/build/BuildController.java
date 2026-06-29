@@ -11,28 +11,34 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api")
 public class BuildController {
+    private final BuildQueryService buildQueryService;
+
+    public BuildController(BuildQueryService buildQueryService) {
+        this.buildQueryService = buildQueryService;
+    }
+
     @PostMapping("/requirements/parse")
     Map<String, Object> parse(@RequestBody Map<String, Object> request) {
-        return BuildSeed.parsedRequirement(request);
+        return buildQueryService.parse(request);
     }
 
     @PostMapping("/builds/recommend")
     Map<String, Object> recommend(@RequestBody(required = false) Map<String, Object> request) {
-        return Map.of("builds", BuildSeed.builds());
+        return buildQueryService.recommendations();
     }
 
     @GetMapping("/builds/{id}")
     Map<String, Object> build(@PathVariable String id) {
-        return BuildSeed.buildDetail(id);
+        return buildQueryService.buildDetail(id);
     }
 
     @GetMapping("/builds/history")
     Map<String, Object> history() {
-        return Map.of("items", BuildSeed.builds());
+        return Map.of("items", buildQueryService.builds());
     }
 
     @PostMapping("/builds/{id}/change-part")
     Map<String, Object> changePart(@PathVariable String id, @RequestBody(required = false) Map<String, Object> request) {
-        return BuildSeed.changePart(id);
+        return buildQueryService.changePart(id, request == null ? Map.of() : request);
     }
 }

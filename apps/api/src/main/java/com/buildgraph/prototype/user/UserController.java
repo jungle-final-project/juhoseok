@@ -3,6 +3,7 @@ package com.buildgraph.prototype.user;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -17,28 +18,37 @@ import org.springframework.web.server.ResponseStatusException;
 @RestController
 @RequestMapping("/api")
 public class UserController {
+    private final UserQueryService userQueryService;
+
+    public UserController(UserQueryService userQueryService) {
+        this.userQueryService = userQueryService;
+    }
+
     @PostMapping("/auth/login")
     Map<String, Object> login(@Valid @RequestBody LoginRequest request) {
-        return UserSeed.login(request.email());
+        return userQueryService.login(request.email());
     }
 
     @PostMapping("/users")
     @ResponseStatus(HttpStatus.CREATED)
     Map<String, Object> signup(@Valid @RequestBody SignupRequest request) {
-        return UserSeed.signup(request.name(), request.email());
+        return userQueryService.signup(request.name(), request.email(), request.marketingAccepted());
     }
 
     @GetMapping("/auth/me")
     Map<String, Object> me(@RequestHeader(value = "Authorization", required = false) String authorization) {
-        if (authorization == null || !authorization.startsWith("Bearer demo-jwt-")) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "로그인이 필요합니다.");
-        }
-        return UserSeed.me(authorization);
+        return userQueryService.me(authorization);
     }
 
     record LoginRequest(@Email String email, @NotBlank String password) {
     }
 
-    record SignupRequest(@NotBlank String name, @Email String email, @NotBlank String password) {
+    record SignupRequest(
+            @NotBlank String name,
+            @Email String email,
+            @NotBlank String password,
+            @NotNull Boolean termsAccepted,
+            Boolean marketingAccepted
+    ) {
     }
 }
