@@ -10,6 +10,14 @@ final class AgentRunTraceDrafts {
 
     static AgentRagEvidenceDraft ragEvidence(AgentSessionRoot root, AgentRunProfile profile) {
         return switch (profile.purpose()) {
+            case REQUIREMENT_PARSE -> evidence(
+                    "guide-requirement-parse-seed",
+                    "Requirement parsing should extract budget, workload, resolution, vendor preference, noise sensitivity, upgrade intent, and unanswered questions before any build recommendation.",
+                    "Requirement parse guide used by Agent runner.",
+                    BigDecimal.valueOf(0.90),
+                    root,
+                    profile
+            );
             case BUILD_RECOMMEND -> evidence(
                     "internal-rule-qhd-gaming-seed",
                     "QHD gaming recommendations prioritize GPU class, CPU balance, power margin, and current price.",
@@ -45,6 +53,7 @@ final class AgentRunTraceDrafts {
 
     static String deterministicSummary(AgentRunProfile profile) {
         return switch (profile.purpose()) {
+            case REQUIREMENT_PARSE -> "Agent completed a requirement parsing trace with RAG evidence.";
             case BUILD_RECOMMEND -> "Agent completed a build recommendation trace with RAG evidence and Tool checks.";
             case BUILD_EXPLAIN -> "Agent completed a build explanation trace with benchmark and price evidence.";
             case AS_ANALYZE -> "Agent completed an AS analysis trace with troubleshooting evidence and Tool checks.";
@@ -54,6 +63,7 @@ final class AgentRunTraceDrafts {
     static String deterministicSummary(AgentRunProfile profile, AgentRagEvidenceDraft evidence) {
         String evidenceSummary = evidence == null ? "no RAG evidence" : evidence.summary();
         return switch (profile.purpose()) {
+            case REQUIREMENT_PARSE -> "Agent completed a requirement parsing trace using retrieved RAG evidence: " + evidenceSummary;
             case BUILD_RECOMMEND -> "Agent completed a build recommendation trace using retrieved RAG evidence: " + evidenceSummary;
             case BUILD_EXPLAIN -> "Agent completed a build explanation trace using retrieved RAG evidence: " + evidenceSummary;
             case AS_ANALYZE -> "Agent completed an AS analysis trace using retrieved RAG evidence: " + evidenceSummary;
@@ -131,6 +141,7 @@ final class AgentRunTraceDrafts {
 
     private static String toolSummary(String toolName, ToolStatus status, AgentPurpose purpose) {
         return switch (purpose) {
+            case REQUIREMENT_PARSE -> "Seed " + toolName + " check for requirement parsing returned " + status + ".";
             case BUILD_RECOMMEND -> "Seed " + toolName + " check for build recommendation returned " + status + ".";
             case BUILD_EXPLAIN -> "Seed " + toolName + " check for build explanation returned " + status + ".";
             case AS_ANALYZE -> "Seed " + toolName + " check for AS analysis returned " + status + ".";

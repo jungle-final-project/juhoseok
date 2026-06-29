@@ -185,11 +185,15 @@ function parseRows(parsed: ParsedRequirement) {
   const context = parsed.parsedContext ?? {};
   const confidence = context.confidence instanceof Object && !Array.isArray(context.confidence) ? context.confidence as Record<string, unknown> : {};
   return [
+    { 필드: 'parseMode', 값: String(context.parseMode ?? '-'), 확신도: <StatusBadge status={String(context.parseMode).includes('FALLBACK') ? 'WARN' : 'HIGH'} /> },
+    { 필드: 'parser', 값: String(context.parser ?? '-'), 확신도: <StatusBadge status={parsed.agentSessionId ? 'HIGH' : 'MEDIUM'} /> },
     { 필드: 'budget', 값: parsed.budget ? `${parsed.budget.toLocaleString()}원` : '-', 확신도: <StatusBadge status={String(confidence.budget ?? 'LOW')} /> },
     { 필드: 'usageTags', 값: parsed.usageTags.join(', '), 확신도: <StatusBadge status={String(confidence.usageTags ?? 'MEDIUM')} /> },
     { 필드: 'resolution', 값: String(context.resolution ?? '-'), 확신도: <StatusBadge status={String(confidence.resolution ?? 'LOW')} /> },
     { 필드: 'preferredVendors', 값: arrayText(context.preferredVendors), 확신도: <StatusBadge status={String(confidence.preferredVendors ?? 'LOW')} /> },
-    { 필드: 'mustHave', 값: arrayText(context.mustHave), 확신도: <StatusBadge status="MEDIUM" /> }
+    { 필드: 'mustHave', 값: arrayText(context.mustHave), 확신도: <StatusBadge status="MEDIUM" /> },
+    { 필드: 'parseEvidence', 값: parsed.evidenceIds?.length ? `${parsed.evidenceIds.length}개` : '-', 확신도: <StatusBadge status={parsed.evidenceIds?.length ? 'HIGH' : 'LOW'} /> },
+    { 필드: 'agentSummary', 값: parsed.agentSummary ?? String(context.parseNotes ?? '-'), 확신도: <StatusBadge status={parsed.agentSummary ? 'HIGH' : 'MEDIUM'} /> }
   ];
 }
 

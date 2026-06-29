@@ -30,6 +30,10 @@ public class AgentTraceService {
     }
 
     public String createQueuedSession(AgentSessionRoot root, String actor) {
+        return createQueuedSession(root, actor, root.purpose());
+    }
+
+    public String createQueuedSession(AgentSessionRoot root, String actor, AgentPurpose purpose) {
         Map<String, Object> row = jdbcTemplate.queryForMap("""
                 INSERT INTO agent_sessions (
                   user_id,
@@ -52,7 +56,7 @@ public class AgentTraceService {
                 root.requirementId(),
                 root.buildId(),
                 root.asTicketId(),
-                json(List.of(timelineItem(null, "QUEUED", actor, "session created for " + root.purpose()))));
+                json(List.of(timelineItem(null, "QUEUED", actor, "session created for " + purpose))));
         return DbValueMapper.string(row, "id");
     }
 

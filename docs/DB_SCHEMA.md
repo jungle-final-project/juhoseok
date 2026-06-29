@@ -1023,7 +1023,7 @@ MVP 구현 기준:
 - `agent_session_id = null`이면 재사용 RAG source chunk다.
 - `agent_session_id != null`이면 특정 Agent 실행에서 선택되어 저장된 evidence다.
 - 세션별 evidence는 원본 chunk의 `source_id`, `summary`, `chunk_text`를 복사하고, `metadata.sourceEvidenceId`에 원본 `rag_evidence.public_id`를 저장한다.
-- `metadata.purpose`는 `BUILD_RECOMMEND`, `BUILD_EXPLAIN`, `AS_ANALYZE` 중 하나다.
+- `metadata.purpose`는 `REQUIREMENT_PARSE`, `BUILD_RECOMMEND`, `BUILD_EXPLAIN`, `AS_ANALYZE` 중 하나다.
 
 ### `as_tickets.cause_candidates`
 

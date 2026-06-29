@@ -2,11 +2,14 @@ package com.buildgraph.prototype.build;
 
 import com.buildgraph.prototype.agent.AgentRunProfile;
 import com.buildgraph.prototype.agent.AgentRunProfiles;
+import com.buildgraph.prototype.agent.AgentRagEvidenceDraft;
+import com.buildgraph.prototype.agent.AgentRagRetrievalService;
 import com.buildgraph.prototype.agent.AgentRunner;
 import com.buildgraph.prototype.agent.AgentSessionRoot;
 import com.buildgraph.prototype.agent.AgentSessionRootType;
 import com.buildgraph.prototype.agent.AgentStatus;
 import com.buildgraph.prototype.agent.AgentTraceService;
+import com.buildgraph.prototype.agent.OpenAiResponsesClient;
 import com.buildgraph.prototype.common.DbValueMapper;
 import com.buildgraph.prototype.common.MockData;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -30,6 +33,15 @@ public class BuildQueryService {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final Pattern BUDGET_MANWON = Pattern.compile("([0-9]{2,4})\\s*만\\s*원?");
     private static final Pattern BUDGET_NUMBER = Pattern.compile("([0-9][0-9,]{5,})\\s*원?");
+    private static final String REQUIREMENT_PARSE_SYSTEM_PROMPT = """
+            당신은 BuildGraph AI의 PC 요구사항 파싱 Agent입니다.
+            RAG 근거와 사용자 입력만 사용해 추천 전에 필요한 구조화 JSON을 만드십시오.
+            확인되지 않은 예산, 해상도, 제조사, 용도는 지어내지 말고 null 또는 빈 배열로 두십시오.
+            usageTags는 GAMING, DEVELOPMENT, VIDEO_EDIT, AI_DEV, GENERAL 중에서만 고르십시오.
+            mustHave는 WIFI, LOW_NOISE 중 확인된 조건만 넣으십시오.
+            confidence 값은 LOW, MEDIUM, HIGH 중 하나만 쓰십시오.
+            응답은 설명 문장 없이 JSON object 하나만 반환하십시오.
+            """;
     private static final List<String> BUILD_CATEGORIES = List.of(
             "CPU", "MOTHERBOARD", "RAM", "GPU", "STORAGE", "PSU", "CASE", "COOLER"
     );
@@ -42,11 +54,21 @@ public class BuildQueryService {
     private final JdbcTemplate jdbcTemplate;
     private final AgentTraceService agentTraceService;
     private final AgentRunner agentRunner;
+    private final AgentRagRetrievalService agentRagRetrievalService;
+    private final OpenAiResponsesClient openAiResponsesClient;
 
-    public BuildQueryService(JdbcTemplate jdbcTemplate, AgentTraceService agentTraceService, AgentRunner agentRunner) {
+    public BuildQueryService(
+            JdbcTemplate jdbcTemplate,
+            AgentTraceService agentTraceService,
+            AgentRunner agentRunner,
+            AgentRagRetrievalService agentRagRetrievalService,
+            OpenAiResponsesClient openAiResponsesClient
+    ) {
         this.jdbcTemplate = jdbcTemplate;
         this.agentTraceService = agentTraceService;
         this.agentRunner = agentRunner;
+        this.agentRagRetrievalService = agentRagRetrievalService;
+        this.openAiResponsesClient = openAiResponsesClient;
     }
 
     public Map<String, Object> parse(Map<String, Object> request) {
@@ -56,30 +78,12 @@ public class BuildQueryService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "자연어 요구사항은 필수입니다.");
         }
 
-        Integer budget = numberValue(body.get("budget"));
-        if (budget == null) {
-            budget = inferBudget(message);
-        }
-        List<String> usageTags = usageTags(body.get("usageTags"), message);
-        String resolution = firstText(text(body.get("resolution")), inferResolution(message));
-        List<String> preferredVendors = preferredVendors(body.get("preferredVendors"), message);
-        String priority = text(body.get("priority"));
-        List<String> mustHave = mustHave(message);
-
-        Map<String, Object> parsedContext = MockData.map(
-                "usageTags", usageTags,
-                "budget", budget,
-                "resolution", resolution,
-                "preferredVendors", preferredVendors,
-                "priority", priority,
-                "mustHave", mustHave,
-                "confidence", MockData.map(
-                        "usageTags", usageTags.isEmpty() ? "LOW" : "HIGH",
-                        "budget", budget == null ? "LOW" : "HIGH",
-                        "resolution", resolution == null ? "LOW" : "MEDIUM",
-                        "preferredVendors", preferredVendors.isEmpty() ? "LOW" : "MEDIUM"
-                )
-        );
+        Map<String, Object> fallbackContext = deterministicParsedContext(body, message);
+        Integer fallbackBudget = numberValue(fallbackContext.get("budget"));
+        List<String> fallbackUsageTags = stringList(fallbackContext.get("usageTags"));
+        Map<String, Object> pendingContext = new LinkedHashMap<>(fallbackContext);
+        pendingContext.put("parseMode", "RAG_PENDING");
+        pendingContext.put("parser", "requirement-parse-agent-v1");
         String id = jdbcTemplate.queryForObject("""
                 INSERT INTO requirements (user_id, raw_message, budget, usage_tags, parsed_context)
                 VALUES (
@@ -90,7 +94,19 @@ public class BuildQueryService {
                   ?::jsonb
                 )
                 RETURNING public_id::text
-                """, String.class, message, budget, String.join(",", usageTags), json(parsedContext));
+                """, String.class, message, fallbackBudget, String.join(",", fallbackUsageTags), json(pendingContext));
+
+        RequirementParseResult parseResult = runRequirementParseAgent(id, message, body, fallbackContext);
+        Map<String, Object> parsedContext = parseResult.parsedContext();
+        Integer budget = numberValue(parsedContext.get("budget"));
+        List<String> usageTags = stringList(parsedContext.get("usageTags"));
+        jdbcTemplate.update("""
+                UPDATE requirements
+                SET budget = ?,
+                    usage_tags = string_to_array(?, ','),
+                    parsed_context = ?::jsonb
+                WHERE public_id = ?::uuid
+                """, budget, String.join(",", usageTags), json(parsedContext), id);
 
         return MockData.map(
                 "id", id,
@@ -98,7 +114,10 @@ public class BuildQueryService {
                 "budget", budget,
                 "usageTags", usageTags,
                 "parsedContext", parsedContext,
-                "questions", questions(parsedContext)
+                "questions", questions(parsedContext),
+                "agentSessionId", parseResult.agentSessionId(),
+                "agentSummary", parseResult.agentSummary(),
+                "evidenceIds", parseResult.evidenceIds()
         );
     }
 
@@ -460,15 +479,222 @@ public class BuildQueryService {
     }
 
     private String runAgent(AgentSessionRoot root) {
+        return runAgent(root, AgentRunProfiles.forRoot(root));
+    }
+
+    private String runAgent(AgentSessionRoot root, AgentRunProfile profile) {
         try {
-            AgentRunProfile profile = AgentRunProfiles.forRoot(root);
-            String sessionId = agentTraceService.createQueuedSession(root, "SYSTEM");
+            String sessionId = agentTraceService.createQueuedSession(root, "SYSTEM", profile.purpose());
             agentTraceService.advanceStatus(sessionId, AgentStatus.RUNNING, "SYSTEM", "agent run requested for " + profile.purpose());
             agentRunner.run(sessionId, root, profile);
             return sessionId;
         } catch (RuntimeException error) {
             return null;
         }
+    }
+
+    private RequirementParseResult runRequirementParseAgent(
+            String requirementId,
+            String message,
+            Map<String, Object> request,
+            Map<String, Object> fallbackContext
+    ) {
+        AgentSessionRoot root = new AgentSessionRoot(AgentSessionRootType.REQUIREMENT, requirementId);
+        AgentRunProfile profile = AgentRunProfiles.requirementParse();
+        String sessionId = null;
+        try {
+            sessionId = agentTraceService.createQueuedSession(root, "SYSTEM", profile.purpose());
+            agentTraceService.advanceStatus(sessionId, AgentStatus.RUNNING, "SYSTEM", "requirement parse agent requested");
+            AgentRagEvidenceDraft evidence = agentRagRetrievalService.retrieveEvidence(root, profile);
+            String evidenceId = agentTraceService.recordRagEvidence(sessionId, evidence);
+            agentTraceService.advanceStatus(sessionId, AgentStatus.RAG_SEARCHED, "SYSTEM", "requirement parse RAG evidence retrieved");
+
+            if (openAiResponsesClient.isConfigured()) {
+                try {
+                    Map<String, Object> llmContext = llmParsedContext(message, request, fallbackContext, evidenceId, evidence);
+                    Map<String, Object> parsedContext = withAgentParseMetadata(
+                            normalizeParsedContext(llmContext, fallbackContext),
+                            "AGENT_RAG_LLM",
+                            sessionId,
+                            List.of(evidenceId),
+                            evidence,
+                            text(llmContext.get("parseNotes")),
+                            null
+                    );
+                    String summary = firstText(
+                            text(parsedContext.get("parseNotes")),
+                            "LLM structured parser generated requirement context from RAG evidence."
+                    );
+                    agentTraceService.advanceStatus(sessionId, AgentStatus.TOOLS_CALLED, "SYSTEM", "requirement parse does not require hardware tools");
+                    agentTraceService.updateSummary(sessionId, summary);
+                    agentTraceService.advanceStatus(sessionId, AgentStatus.SUMMARY_READY, "SYSTEM", "requirement parse context generated");
+                    agentTraceService.advanceStatus(sessionId, AgentStatus.SUCCEEDED, "SYSTEM", "requirement parse agent completed");
+                    return new RequirementParseResult(parsedContext, sessionId, summary, List.of(evidenceId));
+                } catch (RuntimeException llmError) {
+                    Map<String, Object> parsedContext = withAgentParseMetadata(
+                            fallbackContext,
+                            "AGENT_RAG_FALLBACK",
+                            sessionId,
+                            List.of(evidenceId),
+                            evidence,
+                            "LLM structured parse failed; deterministic normalizer kept the request usable.",
+                            safeReason(llmError)
+                    );
+                    String summary = "RAG evidence retrieved, but LLM structured parse failed. Deterministic normalized context was used.";
+                    agentTraceService.updateSummary(sessionId, summary);
+                    agentTraceService.advanceStatus(sessionId, AgentStatus.FALLBACK_READY, "SYSTEM", "requirement parse LLM failed");
+                    agentTraceService.advanceStatus(sessionId, AgentStatus.SUCCEEDED, "SYSTEM", "requirement parse fallback completed");
+                    return new RequirementParseResult(parsedContext, sessionId, summary, List.of(evidenceId));
+                }
+            }
+
+            Map<String, Object> parsedContext = withAgentParseMetadata(
+                    fallbackContext,
+                    "AGENT_RAG_DETERMINISTIC",
+                    sessionId,
+                    List.of(evidenceId),
+                    evidence,
+                    "RAG evidence retrieved; deterministic normalizer produced the structured context because OpenAI is not configured.",
+                    null
+            );
+            String summary = "RAG evidence retrieved; deterministic normalizer generated the requirement context.";
+            agentTraceService.advanceStatus(sessionId, AgentStatus.TOOLS_CALLED, "SYSTEM", "requirement parse does not require hardware tools");
+            agentTraceService.updateSummary(sessionId, summary);
+            agentTraceService.advanceStatus(sessionId, AgentStatus.SUMMARY_READY, "SYSTEM", "requirement parse context generated");
+            agentTraceService.advanceStatus(sessionId, AgentStatus.SUCCEEDED, "SYSTEM", "requirement parse agent completed");
+            return new RequirementParseResult(parsedContext, sessionId, summary, List.of(evidenceId));
+        } catch (RuntimeException error) {
+            Map<String, Object> parsedContext = withAgentParseMetadata(
+                    fallbackContext,
+                    "DETERMINISTIC_FALLBACK",
+                    sessionId,
+                    List.of(),
+                    null,
+                    "Requirement parse Agent failed before RAG evidence could be attached; deterministic normalizer was used.",
+                    safeReason(error)
+            );
+            return new RequirementParseResult(parsedContext, sessionId, null, List.of());
+        }
+    }
+
+    private Map<String, Object> llmParsedContext(
+            String message,
+            Map<String, Object> request,
+            Map<String, Object> fallbackContext,
+            String evidenceId,
+            AgentRagEvidenceDraft evidence
+    ) {
+        String output = openAiResponsesClient.createSummary(
+                REQUIREMENT_PARSE_SYSTEM_PROMPT,
+                json(MockData.map(
+                        "rawMessage", message,
+                        "optionalInputs", request,
+                        "fallbackNormalizer", fallbackContext,
+                        "ragEvidence", MockData.map(
+                                "id", evidenceId,
+                                "sourceId", evidence.sourceId(),
+                                "summary", evidence.summary(),
+                                "chunkText", evidence.chunkText(),
+                                "score", evidence.score(),
+                                "metadata", evidence.metadata()
+                        ),
+                        "requiredJsonShape", MockData.map(
+                                "budget", "integer or null",
+                                "usageTags", List.of("GAMING", "DEVELOPMENT", "VIDEO_EDIT", "AI_DEV", "GENERAL"),
+                                "resolution", "FHD | QHD | 4K | null",
+                                "preferredVendors", List.of("NVIDIA", "AMD", "INTEL"),
+                                "priority", "string or null",
+                                "mustHave", List.of("WIFI", "LOW_NOISE"),
+                                "confidence", MockData.map("budget", "LOW|MEDIUM|HIGH", "usageTags", "LOW|MEDIUM|HIGH", "resolution", "LOW|MEDIUM|HIGH", "preferredVendors", "LOW|MEDIUM|HIGH"),
+                                "parseNotes", "short Korean sentence"
+                        )
+                ))
+        );
+        return parseJsonObject(output);
+    }
+
+    private static Map<String, Object> deterministicParsedContext(Map<String, Object> body, String message) {
+        Integer budget = numberValue(body.get("budget"));
+        if (budget == null) {
+            budget = inferBudget(message);
+        }
+        List<String> usageTags = usageTags(body.get("usageTags"), message);
+        String resolution = firstText(text(body.get("resolution")), inferResolution(message));
+        List<String> preferredVendors = preferredVendors(body.get("preferredVendors"), message);
+        String priority = text(body.get("priority"));
+        List<String> mustHave = mustHave(message);
+        return MockData.map(
+                "usageTags", usageTags,
+                "budget", budget,
+                "resolution", resolution,
+                "preferredVendors", preferredVendors,
+                "priority", priority,
+                "mustHave", mustHave,
+                "confidence", MockData.map(
+                        "usageTags", usageTags.isEmpty() ? "LOW" : "HIGH",
+                        "budget", budget == null ? "LOW" : "HIGH",
+                        "resolution", resolution == null ? "LOW" : "MEDIUM",
+                        "preferredVendors", preferredVendors.isEmpty() ? "LOW" : "MEDIUM"
+                )
+        );
+    }
+
+    private static Map<String, Object> withAgentParseMetadata(
+            Map<String, Object> context,
+            String parseMode,
+            String sessionId,
+            List<String> evidenceIds,
+            AgentRagEvidenceDraft evidence,
+            String parseNotes,
+            String fallbackReason
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>(normalizeParsedContext(context, context));
+        result.put("parseMode", parseMode);
+        result.put("parser", "requirement-parse-agent-v1");
+        result.put("agentSessionId", sessionId);
+        result.put("evidenceIds", evidenceIds);
+        result.put("ragGuidance", evidence == null ? null : evidence.summary());
+        result.put("ragSourceId", evidence == null ? null : evidence.sourceId());
+        result.put("parseNotes", parseNotes);
+        if (fallbackReason != null) {
+            result.put("fallbackReason", fallbackReason);
+        }
+        return result;
+    }
+
+    private static Map<String, Object> normalizeParsedContext(Map<String, Object> source, Map<String, Object> fallback) {
+        Integer budget = firstNumber(source.get("budget"), fallback.get("budget"));
+        List<String> usageTags = normalizeUsageTags(stringList(source.get("usageTags")));
+        if (usageTags.isEmpty()) {
+            usageTags = normalizeUsageTags(stringList(fallback.get("usageTags")));
+        }
+        String resolution = normalizeResolution(firstText(text(source.get("resolution")), text(fallback.get("resolution"))));
+        List<String> preferredVendors = normalizeVendors(stringList(source.get("preferredVendors")));
+        if (preferredVendors.isEmpty()) {
+            preferredVendors = normalizeVendors(stringList(fallback.get("preferredVendors")));
+        }
+        String priority = firstText(text(source.get("priority")), text(fallback.get("priority")));
+        List<String> mustHave = normalizeMustHave(stringList(source.get("mustHave")));
+        if (mustHave.isEmpty()) {
+            mustHave = normalizeMustHave(stringList(fallback.get("mustHave")));
+        }
+        Map<String, Object> confidence = normalizeConfidence(
+                objectMap(source.get("confidence")),
+                objectMap(fallback.get("confidence"))
+        );
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("usageTags", usageTags.isEmpty() ? List.of("GENERAL") : usageTags);
+        result.put("budget", budget);
+        result.put("resolution", resolution);
+        result.put("preferredVendors", preferredVendors);
+        result.put("priority", priority);
+        result.put("mustHave", mustHave);
+        result.put("confidence", confidence);
+        String parseNotes = firstText(text(source.get("parseNotes")), text(fallback.get("parseNotes")));
+        if (parseNotes != null) {
+            result.put("parseNotes", parseNotes);
+        }
+        return result;
     }
 
     private Map<String, Object> agentSession(String id) {
@@ -865,6 +1091,148 @@ public class BuildQueryService {
         return result;
     }
 
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> parseJsonObject(String output) {
+        try {
+            Object parsed = OBJECT_MAPPER.readValue(extractJsonObject(output), Object.class);
+            if (parsed instanceof Map<?, ?> map) {
+                Map<String, Object> result = new LinkedHashMap<>();
+                map.forEach((key, value) -> result.put(String.valueOf(key), value));
+                return result;
+            }
+            throw new IllegalArgumentException("JSON object가 아닙니다.");
+        } catch (Exception e) {
+            throw new IllegalArgumentException("LLM structured parse JSON을 해석할 수 없습니다.", e);
+        }
+    }
+
+    private static String extractJsonObject(String output) {
+        String text = text(output);
+        if (text == null) {
+            throw new IllegalArgumentException("LLM 응답이 비어 있습니다.");
+        }
+        if (text.startsWith("```")) {
+            text = text.replaceFirst("^```[a-zA-Z]*\\s*", "").replaceFirst("\\s*```$", "").trim();
+        }
+        int start = text.indexOf('{');
+        int end = text.lastIndexOf('}');
+        if (start < 0 || end <= start) {
+            throw new IllegalArgumentException("LLM 응답에서 JSON object를 찾을 수 없습니다.");
+        }
+        return text.substring(start, end + 1);
+    }
+
+    private static Integer firstNumber(Object first, Object fallback) {
+        Integer value = safeNumberValue(first);
+        return value == null ? safeNumberValue(fallback) : value;
+    }
+
+    private static Integer safeNumberValue(Object value) {
+        try {
+            Integer parsed = numberValue(value);
+            if (parsed != null) {
+                return parsed;
+            }
+        } catch (RuntimeException ignored) {
+            // Try Korean budget patterns below.
+        }
+        String text = text(value);
+        return text == null ? null : inferBudget(text);
+    }
+
+    private static List<String> normalizeUsageTags(List<String> values) {
+        Set<String> result = new LinkedHashSet<>();
+        for (String value : values) {
+            String normalized = value.toUpperCase(Locale.ROOT);
+            if (normalized.contains("GAME") || normalized.contains("GAMING") || value.contains("게임") || value.contains("배그")) {
+                result.add("GAMING");
+            } else if (normalized.contains("DEV") || value.contains("개발") || value.contains("IDE")) {
+                result.add("DEVELOPMENT");
+            } else if (normalized.contains("VIDEO") || value.contains("영상") || value.contains("편집")) {
+                result.add("VIDEO_EDIT");
+            } else if (normalized.contains("AI")) {
+                result.add("AI_DEV");
+            } else if (normalized.contains("GENERAL") || value.contains("일반") || value.contains("사무")) {
+                result.add("GENERAL");
+            }
+        }
+        return new ArrayList<>(result);
+    }
+
+    private static String normalizeResolution(String value) {
+        String upper = value == null ? null : value.toUpperCase(Locale.ROOT);
+        if (upper == null) {
+            return null;
+        }
+        if (upper.contains("4K") || upper.contains("UHD")) {
+            return "4K";
+        }
+        if (upper.contains("QHD")) {
+            return "QHD";
+        }
+        if (upper.contains("FHD")) {
+            return "FHD";
+        }
+        return null;
+    }
+
+    private static List<String> normalizeVendors(List<String> values) {
+        Set<String> result = new LinkedHashSet<>();
+        for (String value : values) {
+            String upper = value.toUpperCase(Locale.ROOT);
+            if (upper.contains("NVIDIA") || upper.contains("RTX")) {
+                result.add("NVIDIA");
+            }
+            if (upper.contains("AMD") || upper.contains("RADEON") || upper.contains("RYZEN")) {
+                result.add("AMD");
+            }
+            if (upper.contains("INTEL")) {
+                result.add("INTEL");
+            }
+        }
+        return new ArrayList<>(result);
+    }
+
+    private static List<String> normalizeMustHave(List<String> values) {
+        Set<String> result = new LinkedHashSet<>();
+        for (String value : values) {
+            String lower = value.toLowerCase(Locale.ROOT);
+            if (lower.contains("wifi") || lower.contains("wi-fi") || value.contains("와이파이")) {
+                result.add("WIFI");
+            }
+            if (lower.contains("noise") || value.contains("저소음") || value.contains("조용") || "LOW_NOISE".equalsIgnoreCase(value)) {
+                result.add("LOW_NOISE");
+            }
+        }
+        return new ArrayList<>(result);
+    }
+
+    private static Map<String, Object> normalizeConfidence(Map<String, Object> source, Map<String, Object> fallback) {
+        return MockData.map(
+                "usageTags", confidenceValue(source.get("usageTags"), fallback.get("usageTags"), "MEDIUM"),
+                "budget", confidenceValue(source.get("budget"), fallback.get("budget"), "LOW"),
+                "resolution", confidenceValue(source.get("resolution"), fallback.get("resolution"), "LOW"),
+                "preferredVendors", confidenceValue(source.get("preferredVendors"), fallback.get("preferredVendors"), "LOW")
+        );
+    }
+
+    private static String confidenceValue(Object value, Object fallback, String defaultValue) {
+        String text = firstText(text(value), text(fallback));
+        if (text == null) {
+            return defaultValue;
+        }
+        String upper = text.toUpperCase(Locale.ROOT);
+        if ("HIGH".equals(upper) || "MEDIUM".equals(upper) || "LOW".equals(upper)) {
+            return upper;
+        }
+        return defaultValue;
+    }
+
+    private static String safeReason(RuntimeException error) {
+        String message = error.getMessage();
+        return message == null || message.isBlank() ? error.getClass().getSimpleName() : message;
+    }
+
     private static List<String> stringList(Object value) {
         if (value instanceof List<?> list) {
             return list.stream().map(String::valueOf).map(String::trim).filter(item -> !item.isBlank()).toList();
@@ -951,6 +1319,14 @@ public class BuildQueryService {
             Integer budget,
             List<String> usageTags,
             Map<String, Object> parsedContext
+    ) {
+    }
+
+    private record RequirementParseResult(
+            Map<String, Object> parsedContext,
+            String agentSessionId,
+            String agentSummary,
+            List<String> evidenceIds
     ) {
     }
 

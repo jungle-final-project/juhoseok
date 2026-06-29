@@ -12,6 +12,9 @@ export type ParsedRequirement = {
   usageTags: string[];
   parsedContext: Record<string, unknown>;
   questions: RequirementQuestion[];
+  agentSessionId?: string | null;
+  agentSummary?: string | null;
+  evidenceIds?: string[];
 };
 
 export type WarningDto = {

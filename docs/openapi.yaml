@@ -918,6 +918,18 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/RequirementQuestionDto"
+        agentSessionId:
+          type: string
+          format: uuid
+          nullable: true
+        agentSummary:
+          type: string
+          nullable: true
+        evidenceIds:
+          type: array
+          items:
+            type: string
+            format: uuid
     RequirementQuestionDto:
       type: object
       required: [key, label, options, required]
