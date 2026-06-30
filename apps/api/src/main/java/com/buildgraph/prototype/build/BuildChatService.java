@@ -312,7 +312,7 @@ public class BuildChatService {
     }
 
     private List<PartCandidate> partCandidates(String category, boolean toolReadyOnly) {
-        String toolReadyWhere = toolReadyOnly ? " AND coalesce((attributes->>'toolReady')::boolean, false) = true" : "";
+        String toolReadyWhere = toolReadyOnly ? " AND coalesce((attributes->>'toolReady')::boolean, false) = true\n" : "";
         return jdbcTemplate.queryForList("""
                         SELECT id AS internal_id,
                                public_id::text AS id,
