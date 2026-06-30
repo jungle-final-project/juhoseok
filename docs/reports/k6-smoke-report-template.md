@@ -23,7 +23,7 @@
 | `docker compose config` | `<PASS/FAIL>` | `<command output summary>` |
 | `docker compose up --build` | `<PASS/FAIL/N/A>` | `<service status summary>` |
 | `/api/health` | `<PASS/FAIL>` | `<status/database response>` |
-| API auth/test seed 상태 | `<PASS/FAIL/N/A>` | `<demo token or seed note>` |
+| API auth/test seed 상태 | `<PASS/FAIL/N/A>` | `<JWT token or seed note>` |
 
 ## k6 Command
 

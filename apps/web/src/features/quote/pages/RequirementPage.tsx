@@ -1,49 +1,204 @@
-import { FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { FormEvent, useMemo, useState } from 'react';
+import { useMutation } from '@tanstack/react-query';
 import { DataTable, Panel, Screen, StateMessage, StatusBadge } from '../../../components/ui';
-import { Field } from '../components/Field';
+import { QuoteCard } from '../components/QuoteCard';
+import { parseRequirements, recommendBuild } from '../quoteApi';
+import type { BuildSummary, ParsedRequirement, ToolResult } from '../types';
 
 export function RequirementPage() {
-  const navigate = useNavigate();
-  function submit(event: FormEvent) {
+  const [message, setMessage] = useState('');
+  const [budget, setBudget] = useState('');
+  const [usageTags, setUsageTags] = useState('');
+  const [resolution, setResolution] = useState('');
+  const [preferredVendors, setPreferredVendors] = useState('');
+  const [priority, setPriority] = useState('');
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [selectedBuildId, setSelectedBuildId] = useState<string | null>(null);
+
+  const parseMutation = useMutation({
+    mutationFn: () => parseRequirements({
+      message: message.trim(),
+      budget: numberOrUndefined(budget),
+      usageTags: splitText(usageTags),
+      resolution: resolution.trim() || undefined,
+      preferredVendors: splitText(preferredVendors),
+      priority: priority.trim() || undefined
+    }),
+    onSuccess: () => {
+      setAnswers({});
+      setSelectedBuildId(null);
+      recommendMutation.reset();
+    }
+  });
+
+  const recommendMutation = useMutation({
+    mutationFn: (requirement: ParsedRequirement) => recommendBuild(requirement.id, answers),
+    onSuccess: (data) => {
+      setSelectedBuildId(data.recommendations[0]?.id ?? null);
+    }
+  });
+
+  const parsed = parseMutation.data;
+  const recommendations = recommendMutation.data?.recommendations ?? [];
+  const selectedBuild = useMemo(
+    () => recommendations.find((build) => build.id === selectedBuildId) ?? recommendations[0],
+    [recommendations, selectedBuildId]
+  );
+  const canParse = message.trim().length > 0 && !parseMutation.isPending;
+  const canRecommend = Boolean(parsed) && !recommendMutation.isPending;
+
+  function submitParse(event: FormEvent) {
     event.preventDefault();
-    navigate('/builds/00000000-0000-4000-8000-000000002001');
+    if (canParse) {
+      parseMutation.mutate();
+    }
   }
+
+  function runRecommend() {
+    if (parsed && canRecommend) {
+      recommendMutation.mutate(parsed);
+    }
+  }
+
   return (
     <Screen>
-      <div className="grid grid-cols-[650px_1fr_300px] gap-5">
-        <Panel title="AI 견적 입력" subtitle="자연어 또는 필수 필드 중 하나 이상 입력">
-          <form onSubmit={submit} className="space-y-5">
-            <textarea className="h-36 w-full rounded border border-slate-300 p-4 text-sm" defaultValue="배틀그라운드 QHD 옵션, 개발 IDE도 같이 쓸 예정. 예산은 200만원." />
-            <div className="grid grid-cols-3 gap-4">
-              <Field label="예산" value="2,000,000" />
-              <Field label="주 용도" value="게임, 개발" />
-              <Field label="해상도" value="QHD" />
-              <Field label="브랜드 선호" value="NVIDIA" />
-              <Field label="우선순위" value="성능 > 안정성 > 가격" wide />
+      <div className="space-y-5">
+        <div className="grid grid-cols-[520px_1fr_320px] gap-5">
+          <Panel title="AI 견적 입력" subtitle="자연어 요구사항은 필수, 나머지는 추천 품질 보강용 선택 입력입니다.">
+            <form onSubmit={submitParse} className="space-y-4">
+              <textarea
+                value={message}
+                onChange={(event) => setMessage(event.target.value)}
+                className="h-36 w-full rounded border border-slate-300 p-4 text-sm outline-none focus:border-brand-blue"
+                placeholder="예: 200만원 안에서 QHD 게임과 개발을 같이 할 PC 추천해줘. NVIDIA 선호."
+              />
+              <div className="grid grid-cols-2 gap-3">
+                <Input label="예산" value={budget} onChange={setBudget} placeholder="2000000" />
+                <Input label="주 용도" value={usageTags} onChange={setUsageTags} placeholder="게임, 개발" />
+                <Input label="해상도" value={resolution} onChange={setResolution} placeholder="QHD" />
+                <Input label="브랜드 선호" value={preferredVendors} onChange={setPreferredVendors} placeholder="NVIDIA" />
+                <div className="col-span-2">
+                  <Input label="우선순위" value={priority} onChange={setPriority} placeholder="성능 > 안정성 > 가격" />
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <button disabled={!canParse} className="rounded bg-brand-blue px-5 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:bg-slate-300">
+                  {parseMutation.isPending ? '분석 중' : '요구사항 분석'}
+                </button>
+                <button type="button" onClick={() => { setMessage(''); setBudget(''); setUsageTags(''); setResolution(''); setPreferredVendors(''); setPriority(''); }} className="rounded border border-slate-300 px-5 py-2 text-sm font-bold">
+                  초기화
+                </button>
+              </div>
+            </form>
+          </Panel>
+
+          <Panel title="AI 분석 상태" subtitle="추천 준비 진행 상황">
+            {parseMutation.isIdle ? <StateMessage type="info" title="분석 전" body="요구사항을 입력하면 AI가 추천에 필요한 조건을 정리합니다." /> : null}
+            {parseMutation.isPending ? <StateMessage type="info" title="요구사항 분석 중" body="입력 내용을 바탕으로 추천 준비와 추가 질문 생성을 진행하고 있습니다." /> : null}
+            {parseMutation.isError ? <StateMessage type="warn" title="요구사항 분석 실패" body="자연어 입력이 비어 있거나 API 응답을 불러오지 못했습니다." /> : null}
+            {parsed ? <StateMessage type="success" title="분석 완료" body="추천에 필요한 기본 조건을 정리했습니다. 필요한 추가 질문만 오른쪽에 표시했습니다." /> : null}
+          </Panel>
+
+          <Panel title="추가 질문" subtitle="모호한 항목만 선택적으로 답변">
+            {!parsed ? <StateMessage type="info" title="분석 후 활성화" body="추가 질문은 AI 분석 후 필요한 항목만 표시됩니다." /> : null}
+            {parsed ? (
+              <div className="space-y-3">
+                {parsed.questions.length === 0 ? <StateMessage type="success" title="추가 질문 없음" body="추천 생성에 필요한 기본 조건이 충족되었습니다." /> : null}
+                {parsed.questions.map((question) => (
+                  <label key={question.key} className="block rounded border border-slate-200 bg-white p-3 text-xs">
+                    <span className="mb-2 block font-bold text-slate-700">{question.label}</span>
+                    <select
+                      value={answers[question.key] ?? ''}
+                      onChange={(event) => setAnswers((current) => ({ ...current, [question.key]: event.target.value }))}
+                      className="h-9 w-full rounded border border-slate-300 px-2"
+                    >
+                      <option value="">기본값 사용</option>
+                      {question.options.map((option) => <option key={option} value={option}>{option}</option>)}
+                    </select>
+                  </label>
+                ))}
+                <button type="button" disabled={!canRecommend} onClick={runRecommend} className="w-full rounded bg-brand-blue px-4 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:bg-slate-300">
+                  {recommendMutation.isPending ? '추천 생성 중' : '추천 결과 보기'}
+                </button>
+              </div>
+            ) : null}
+          </Panel>
+        </div>
+
+        {recommendMutation.isPending ? (
+          <Panel title="추천 결과 생성 중" subtitle="내부 자산 조합과 Tool 검증을 실행하고 있습니다.">
+            <StateMessage type="info" title="Build 생성 중" body="parts DB에서 후보를 선택하고 compatibility, power, size, performance, price 검증을 수행합니다." />
+          </Panel>
+        ) : null}
+
+        {recommendMutation.isError ? (
+          <Panel title="추천 결과 오류">
+            <StateMessage type="warn" title="추천 생성 실패" body="내부 자산 또는 Agent 실행 결과를 불러오지 못했습니다." />
+          </Panel>
+        ) : null}
+
+        {recommendations.length > 0 ? (
+          <div className="grid grid-cols-[1fr_420px] gap-5">
+            <div className="space-y-5">
+              <Panel title="추천 빌드 3개" subtitle="내부 자산, 저장된 현재가, Tool 검증 결과를 기반으로 생성">
+                <div className="flex gap-4 overflow-x-auto pb-1">
+                  {recommendations.map((build) => (
+                    <QuoteCard key={build.id} build={build} selected={build.id === selectedBuild?.id} onSelect={(nextBuild) => setSelectedBuildId(nextBuild.id)} />
+                  ))}
+                </div>
+              </Panel>
+              <Panel title="Tool 검증 결과" subtitle={selectedBuild ? `${selectedBuild.name} 기준` : undefined}>
+                <DataTable columns={['tool', 'status', 'confidence', 'summary']} rows={toolRows(selectedBuild?.toolResults ?? [])} />
+              </Panel>
             </div>
-            <div className="flex gap-2">
-              {['게임', '개발', '영상편집', 'AI 실습', '저소음', '업그레이드 여유'].map((chip) => <span key={chip} className="rounded-full border border-blue-200 bg-brand-pale px-3 py-1 text-xs font-bold text-brand-blue">{chip}</span>)}
-            </div>
-            <div className="flex gap-3">
-              <button className="rounded bg-brand-blue px-5 py-2 text-sm font-bold text-white">요구사항 분석</button>
-              <button type="button" className="rounded border border-slate-300 px-5 py-2 text-sm font-bold">초기화</button>
-            </div>
-          </form>
-        </Panel>
-        <Panel title="파싱 결과" subtitle="LLM fallback 결과">
-          <DataTable columns={['필드', '값', '확신도']} rows={[
-            { 필드: 'budget', 값: '2,000,000', 확신도: <StatusBadge status="HIGH" /> },
-            { 필드: 'usage', 값: 'gaming, development', 확신도: <StatusBadge status="HIGH" /> },
-            { 필드: 'targetResolution', 값: 'QHD', 확신도: <StatusBadge status="MEDIUM" /> },
-            { 필드: 'brandPreference', 값: 'NVIDIA', 확신도: <StatusBadge status="HIGH" /> }
-          ]} />
-        </Panel>
-        <Panel title="추가 질문" subtitle="누락 필드가 있을 때 표시">
-          <StateMessage type="success" title="추가 질문 없음" body="추천 생성에 필요한 기본 조건이 충족되었습니다." />
-          <Link to="/builds/00000000-0000-4000-8000-000000002001" className="mt-5 block rounded bg-brand-blue px-4 py-3 text-center text-sm font-bold text-white">추천 결과 보기</Link>
-        </Panel>
+            <Panel title="RAG / Agent 근거 요약">
+              <div className="space-y-4">
+                <StateMessage
+                  type={selectedBuild?.agentSummary ? 'success' : 'info'}
+                  title={selectedBuild?.agentSummary ? 'Agent 요약 생성됨' : 'Agent 요약 대기'}
+                  body={selectedBuild?.agentSummary ?? '추천 build와 Tool 결과는 생성되었고, Agent summary는 실행 환경에 따라 비어 있을 수 있습니다.'}
+                />
+                <DataTable columns={['항목', '값']} rows={[
+                  { 항목: 'agentSessionId', 값: selectedBuild?.agentSessionId ?? '-' },
+                  { 항목: 'evidenceIds', 값: selectedBuild?.evidenceIds?.length ? `${selectedBuild.evidenceIds.length}개` : '-' },
+                  { 항목: 'warnings', 값: selectedBuild?.warnings?.length ? `${selectedBuild.warnings.length}개` : '없음' }
+                ]} />
+              </div>
+            </Panel>
+          </div>
+        ) : null}
       </div>
     </Screen>
   );
+}
+
+function Input({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string }) {
+  return (
+    <label className="block text-xs font-bold text-slate-600">
+      <span className="mb-1 block">{label}</span>
+      <input value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} className="h-10 w-full rounded border border-slate-300 px-3 text-sm font-normal text-slate-900 outline-none focus:border-brand-blue" />
+    </label>
+  );
+}
+
+function toolRows(results: ToolResult[]) {
+  return results.map((row) => ({
+    tool: row.tool,
+    status: <StatusBadge status={row.status} />,
+    confidence: <StatusBadge status={row.confidence} />,
+    summary: row.summary
+  }));
+}
+
+function splitText(value: string) {
+  return value.split(',').map((item) => item.trim()).filter(Boolean);
+}
+
+function numberOrUndefined(value: string) {
+  const normalized = value.replace(/,/g, '').trim();
+  if (!normalized) {
+    return undefined;
+  }
+  const parsed = Number.parseInt(normalized, 10);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }

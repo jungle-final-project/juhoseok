@@ -1,29 +1,30 @@
 import { api } from '../../lib/api';
+import type { BuildSummary, ChangePartResponse, ParseRequirementPayload, ParsedRequirement, RecommendBuildResponse } from './types';
 
-export function parseRequirements(message: string, budget?: number) {
-  return api('/api/requirements/parse', {
+export function parseRequirements(payload: ParseRequirementPayload) {
+  return api<ParsedRequirement>('/api/requirements/parse', {
     method: 'POST',
-    body: JSON.stringify({ message, budget })
+    body: JSON.stringify(payload)
   });
 }
 
-export function recommendBuild(requirementId: string) {
-  return api('/api/builds/recommend', {
+export function recommendBuild(requirementId: string, answers: Record<string, string> = {}) {
+  return api<RecommendBuildResponse>('/api/builds/recommend', {
     method: 'POST',
-    body: JSON.stringify({ requirementId })
+    body: JSON.stringify({ requirementId, answers })
   });
 }
 
 export function getBuild(buildId: string) {
-  return api(`/api/builds/${buildId}`);
+  return api<BuildSummary>(`/api/builds/${buildId}`);
 }
 
 export function getBuildHistory() {
-  return api('/api/builds/history');
+  return api<{ items: BuildSummary[] }>('/api/builds/history');
 }
 
 export function changePart(buildId: string, category: string, partId: string) {
-  return api(`/api/builds/${buildId}/change-part`, {
+  return api<ChangePartResponse>(`/api/builds/${buildId}/change-part`, {
     method: 'POST',
     body: JSON.stringify({ category, partId })
   });

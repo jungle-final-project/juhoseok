@@ -49,7 +49,7 @@ test('does not expose protected admin page content without admin permission', as
 test('shows permission screen when auth/me returns USER role', async ({ page }) => {
   let authMeCalls = 0;
   await page.addInitScript(() => {
-    localStorage.setItem('buildgraph.token', 'demo-jwt-user');
+    localStorage.setItem('buildgraph.token', 'jwt-user-token');
   });
   await page.route('**/api/auth/me', async (route) => {
     authMeCalls += 1;
@@ -91,7 +91,7 @@ test('shows login-needed message when auth/me returns 401', async ({ page }) => 
 test('shows permission message when auth/me returns 403', async ({ page }) => {
   let authMeCalls = 0;
   await page.addInitScript(() => {
-    localStorage.setItem('buildgraph.token', 'demo-jwt-user');
+    localStorage.setItem('buildgraph.token', 'jwt-user-token');
   });
   await page.route('**/api/auth/me', async (route) => {
     authMeCalls += 1;
@@ -112,7 +112,7 @@ test('shows permission message when auth/me returns 403', async ({ page }) => {
 test('renders admin page when auth/me returns ADMIN role', async ({ page }) => {
   let authMeCalls = 0;
   await page.addInitScript(() => {
-    localStorage.setItem('buildgraph.token', 'demo-jwt-admin');
+    localStorage.setItem('buildgraph.token', 'jwt-admin-token');
   });
   await page.route('**/api/auth/me', async (route) => {
     authMeCalls += 1;
@@ -176,7 +176,7 @@ test('renders admin page when auth/me returns ADMIN role', async ({ page }) => {
 
 test('renders eight admin shell navigation entries for ADMIN role', async ({ page }) => {
   await page.addInitScript(() => {
-    localStorage.setItem('buildgraph.token', 'demo-jwt-admin');
+    localStorage.setItem('buildgraph.token', 'jwt-admin-token');
   });
   await page.route('**/api/auth/me', async (route) => {
     await route.fulfill({
@@ -226,7 +226,7 @@ test('renders eight admin shell navigation entries for ADMIN role', async ({ pag
 
 test('renders price job and load test admin menu pages for ADMIN role', async ({ page }) => {
   await page.addInitScript(() => {
-    localStorage.setItem('buildgraph.token', 'demo-jwt-admin');
+    localStorage.setItem('buildgraph.token', 'jwt-admin-token');
   });
   await page.route('**/api/auth/me', async (route) => {
     await route.fulfill({
@@ -252,7 +252,7 @@ test('renders price job and load test admin menu pages for ADMIN role', async ({
 
 test('renders admin dashboard with ADMIN role and dashboard API response', async ({ page }) => {
   await page.addInitScript(() => {
-    localStorage.setItem('buildgraph.token', 'demo-jwt-admin');
+    localStorage.setItem('buildgraph.token', 'jwt-admin-token');
   });
   let authMeAuthorization: string | undefined;
   await page.route('**/api/auth/me', async (route) => {
@@ -330,16 +330,16 @@ test('renders admin dashboard with ADMIN role and dashboard API response', async
   await expect(page.locator('main')).toContainText('Agent/RAG');
   await expect(page.locator('main')).toContainText('AS 티켓');
   await expect(page.locator('main')).not.toContainText('undefined');
-  expect(authMeAuthorization).toBe('Bearer demo-jwt-admin');
+  expect(authMeAuthorization).toBe('Bearer jwt-admin-token');
   expect(dashboardCalls).toBe(1);
-  expect(dashboardAuthorization).toBe('Bearer demo-jwt-admin');
+  expect(dashboardAuthorization).toBe('Bearer jwt-admin-token');
   expect(auditLogCalls).toBe(1);
-  expect(auditLogAuthorization).toBe('Bearer demo-jwt-admin');
+  expect(auditLogAuthorization).toBe('Bearer jwt-admin-token');
 });
 
 test('shows degraded alert on admin dashboard when dashboard API reports degraded', async ({ page }) => {
   await page.addInitScript(() => {
-    localStorage.setItem('buildgraph.token', 'demo-jwt-admin');
+    localStorage.setItem('buildgraph.token', 'jwt-admin-token');
   });
   await page.route('**/api/auth/me', async (route) => {
     await route.fulfill({
@@ -382,7 +382,7 @@ test('shows degraded alert on admin dashboard when dashboard API reports degrade
 
 test('keeps admin dashboard usable when audit logs API fails', async ({ page }) => {
   await page.addInitScript(() => {
-    localStorage.setItem('buildgraph.token', 'demo-jwt-admin');
+    localStorage.setItem('buildgraph.token', 'jwt-admin-token');
   });
   await page.route('**/api/auth/me', async (route) => {
     await route.fulfill({
@@ -423,7 +423,7 @@ test('keeps admin dashboard usable when audit logs API fails', async ({ page }) 
 
 test('shows admin dashboard loading state while dashboard API is pending', async ({ page }) => {
   await page.addInitScript(() => {
-    localStorage.setItem('buildgraph.token', 'demo-jwt-admin');
+    localStorage.setItem('buildgraph.token', 'jwt-admin-token');
   });
   await page.route('**/api/auth/me', async (route) => {
     await route.fulfill({
@@ -464,7 +464,7 @@ test('shows admin dashboard loading state while dashboard API is pending', async
 
 test('shows admin dashboard error state when dashboard API fails', async ({ page }) => {
   await page.addInitScript(() => {
-    localStorage.setItem('buildgraph.token', 'demo-jwt-admin');
+    localStorage.setItem('buildgraph.token', 'jwt-admin-token');
   });
   await page.route('**/api/auth/me', async (route) => {
     await route.fulfill({

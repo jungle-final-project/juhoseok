@@ -3,6 +3,7 @@ package com.buildgraph.prototype.agent;
 import com.buildgraph.prototype.common.MockData;
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 
 final class AgentRunTraceDrafts {
     private AgentRunTraceDrafts() {
@@ -10,6 +11,14 @@ final class AgentRunTraceDrafts {
 
     static AgentRagEvidenceDraft ragEvidence(AgentSessionRoot root, AgentRunProfile profile) {
         return switch (profile.purpose()) {
+            case REQUIREMENT_PARSE -> evidence(
+                    "guide-requirement-parse-seed",
+                    "Requirement parsing should extract budget, workload, resolution, vendor preference, noise sensitivity, upgrade intent, and unanswered questions before any build recommendation.",
+                    "Requirement parse guide used by Agent runner.",
+                    BigDecimal.valueOf(0.90),
+                    root,
+                    profile
+            );
             case BUILD_RECOMMEND -> evidence(
                     "internal-rule-qhd-gaming-seed",
                     "QHD gaming recommendations prioritize GPU class, CPU balance, power margin, and current price.",
@@ -43,11 +52,33 @@ final class AgentRunTraceDrafts {
                 .toList();
     }
 
+    /** Converts real ToolCheckService results into Agent trace drafts. */
+    static List<AgentToolInvocationDraft> toolInvocationsFromResults(
+            AgentSessionRoot root,
+            AgentRunProfile profile,
+            List<Map<String, Object>> results
+    ) {
+        return results.stream()
+                .map(result -> toolInvocationFromResult(root, profile, result))
+                .toList();
+    }
+
     static String deterministicSummary(AgentRunProfile profile) {
         return switch (profile.purpose()) {
+            case REQUIREMENT_PARSE -> "Agent completed a requirement parsing trace with RAG evidence.";
             case BUILD_RECOMMEND -> "Agent completed a build recommendation trace with RAG evidence and Tool checks.";
             case BUILD_EXPLAIN -> "Agent completed a build explanation trace with benchmark and price evidence.";
             case AS_ANALYZE -> "Agent completed an AS analysis trace with troubleshooting evidence and Tool checks.";
+        };
+    }
+
+    static String deterministicSummary(AgentRunProfile profile, AgentRagEvidenceDraft evidence) {
+        String evidenceSummary = evidence == null ? "no RAG evidence" : evidence.summary();
+        return switch (profile.purpose()) {
+            case REQUIREMENT_PARSE -> "Agent completed a requirement parsing trace using retrieved RAG evidence: " + evidenceSummary;
+            case BUILD_RECOMMEND -> "Agent completed a build recommendation trace using retrieved RAG evidence: " + evidenceSummary;
+            case BUILD_EXPLAIN -> "Agent completed a build explanation trace using retrieved RAG evidence: " + evidenceSummary;
+            case AS_ANALYZE -> "Agent completed an AS analysis trace using retrieved RAG evidence: " + evidenceSummary;
         };
     }
 
@@ -103,6 +134,33 @@ final class AgentRunTraceDrafts {
         );
     }
 
+    /** Builds one Agent Tool draft from a real Tool result map. */
+    private static AgentToolInvocationDraft toolInvocationFromResult(
+            AgentSessionRoot root,
+            AgentRunProfile profile,
+            Map<String, Object> result
+    ) {
+        String toolName = stringValue(result.get("tool"), "unknown");
+        ToolStatus status = enumValue(ToolStatus.class, result.get("status"), ToolStatus.WARN);
+        ConfidenceLevel confidence = enumValue(ConfidenceLevel.class, result.get("confidence"), ConfidenceLevel.MEDIUM);
+        String summary = stringValue(result.get("summary"), "Tool check completed.");
+        return new AgentToolInvocationDraft(
+                toolName,
+                status,
+                confidence,
+                summary,
+                MockData.map(
+                        "toolName", toolName,
+                        "rootType", root.type().name(),
+                        "rootId", root.publicId(),
+                        "purpose", profile.purpose().name(),
+                        "context", MockData.map("summaryTarget", profile.summaryTarget())
+                ),
+                result,
+                latencyMs(toolName)
+        );
+    }
+
     private static ToolStatus toolStatus(String toolName, AgentPurpose purpose) {
         if (purpose == AgentPurpose.AS_ANALYZE && "performance".equals(toolName)) {
             return ToolStatus.WARN;
@@ -122,6 +180,7 @@ final class AgentRunTraceDrafts {
 
     private static String toolSummary(String toolName, ToolStatus status, AgentPurpose purpose) {
         return switch (purpose) {
+            case REQUIREMENT_PARSE -> "Seed " + toolName + " check for requirement parsing returned " + status + ".";
             case BUILD_RECOMMEND -> "Seed " + toolName + " check for build recommendation returned " + status + ".";
             case BUILD_EXPLAIN -> "Seed " + toolName + " check for build explanation returned " + status + ".";
             case AS_ANALYZE -> "Seed " + toolName + " check for AS analysis returned " + status + ".";
@@ -132,5 +191,23 @@ final class AgentRunTraceDrafts {
         List<String> order = List.of("compatibility", "power", "size", "performance", "price");
         int index = order.indexOf(toolName);
         return index < 0 ? 60 : 40 + (index * 11);
+    }
+
+    /** Reads a string fallback from arbitrary Tool result values. */
+    private static String stringValue(Object value, String fallback) {
+        if (value == null) {
+            return fallback;
+        }
+        String text = String.valueOf(value).trim();
+        return text.isBlank() ? fallback : text;
+    }
+
+    /** Reads enum values defensively from arbitrary Tool result values. */
+    private static <T extends Enum<T>> T enumValue(Class<T> enumType, Object value, T fallback) {
+        try {
+            return Enum.valueOf(enumType, stringValue(value, fallback.name()));
+        } catch (RuntimeException ignored) {
+            return fallback;
+        }
     }
 }

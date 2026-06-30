@@ -2,6 +2,7 @@ package com.buildgraph.prototype.rag;
 
 import com.buildgraph.prototype.common.DbValueMapper;
 import com.buildgraph.prototype.common.MockData;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
@@ -18,7 +19,21 @@ public class RagQueryService {
     }
 
     public Map<String, Object> search(String query) {
+        return search(query, null, null);
+    }
+
+    public Map<String, Object> search(String query, Integer page, Integer size) {
         String normalizedQuery = blankToNull(query);
+        int safePage = validatePage(page);
+        int safeSize = validateSize(size);
+        int offset = safePage * safeSize;
+        List<Object> params = new ArrayList<>();
+        params.add(normalizedQuery);
+        params.add(normalizedQuery);
+        params.add(normalizedQuery);
+        params.add(normalizedQuery);
+        params.add(safeSize);
+        params.add(offset);
         List<Map<String, Object>> items = jdbcTemplate.queryForList("""
                         SELECT re.public_id::text AS id,
                                s.public_id::text AS agent_session_id,
@@ -35,12 +50,26 @@ public class RagQueryService {
                           OR lower(re.summary) LIKE lower(concat('%', ?, '%'))
                           OR lower(re.chunk_text) LIKE lower(concat('%', ?, '%'))
                         )
-                        ORDER BY re.score DESC NULLS LAST, re.id
-                        """, normalizedQuery, normalizedQuery, normalizedQuery, normalizedQuery)
+                        ORDER BY CASE WHEN re.agent_session_id IS NULL THEN 0 ELSE 1 END,
+                                 re.score DESC NULLS LAST,
+                                 re.id
+                        LIMIT ?
+                        OFFSET ?
+                        """, params.toArray())
                 .stream()
                 .map(this::publicEvidenceMap)
                 .toList();
-        return MockData.map("items", items, "page", 0, "size", 20, "total", items.size());
+        Integer total = jdbcTemplate.queryForObject("""
+                SELECT count(*)
+                FROM rag_evidence re
+                WHERE (
+                  ? IS NULL
+                  OR lower(re.source_id) LIKE lower(concat('%', ?, '%'))
+                  OR lower(re.summary) LIKE lower(concat('%', ?, '%'))
+                  OR lower(re.chunk_text) LIKE lower(concat('%', ?, '%'))
+                )
+                """, Integer.class, normalizedQuery, normalizedQuery, normalizedQuery, normalizedQuery);
+        return MockData.map("items", items, "page", safePage, "size", safeSize, "total", total == null ? 0 : total);
     }
 
     public Map<String, Object> evidence(String id) {
@@ -109,5 +138,25 @@ public class RagQueryService {
 
     private static String blankToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private static int validatePage(Integer page) {
+        if (page == null) {
+            return 0;
+        }
+        if (page < 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "page는 0 이상이어야 합니다.");
+        }
+        return page;
+    }
+
+    private static int validateSize(Integer size) {
+        if (size == null) {
+            return 20;
+        }
+        if (size < 1 || size > 100) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "size는 1 이상 100 이하이어야 합니다.");
+        }
+        return size;
     }
 }

@@ -8,6 +8,7 @@ public final class AgentRunProfiles {
 
     public static AgentRunProfile forRoot(AgentSessionRoot root) {
         return switch (root.purpose()) {
+            case REQUIREMENT_PARSE -> requirementParse();
             case BUILD_RECOMMEND -> new AgentRunProfile(
                     AgentPurpose.BUILD_RECOMMEND,
                     List.of("PART_SPEC", "BENCHMARK", "INTERNAL_RULE"),
@@ -27,5 +28,14 @@ public final class AgentRunProfiles {
                     "as_cause_and_upgrade_candidates"
             );
         };
+    }
+
+    public static AgentRunProfile requirementParse() {
+        return new AgentRunProfile(
+                AgentPurpose.REQUIREMENT_PARSE,
+                List.of("GUIDE", "BENCHMARK", "INTERNAL_RULE"),
+                List.of(),
+                "requirement_structured_parse"
+        );
     }
 }

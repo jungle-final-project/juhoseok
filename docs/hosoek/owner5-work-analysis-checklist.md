@@ -26,8 +26,8 @@ Figma 기준으로 5번이 직접 맡아야 할 화면은 `153:1880 STATE-15 ADM
 | Health | 완료 | `/api/health` DB probe, 503 DOWN, 테스트/OpenAPI 완료. 2026-06-29 runtime 응답 `{"status":"UP","database":"UP"}` 확인 완료 |
 | Docker Compose | 완료 | `docker compose config` 완료. Postgres init SQL 주입 제거 완료. `docker compose up --build` 기준 web/api/postgres/redis/rabbitmq/mailpit 기동과 health 응답 확인 완료 |
 | Redis | 완료 | Sprint 1 smoke 완료: container `Up`, `redis-cli ping`=`PONG`. 실제 기능 사용은 1번 OAuth one-time code 또는 3번/공통 cache·quota 구현 후 연동 |
-| RabbitMQ | 완료 | Sprint 1 smoke 완료: container `Up`, management API 200, queue 0개 확인. 실제 publish/consume은 3번 Agent job 또는 2번 price job 구현 후 연동 |
-| Mailpit | 완료 | Sprint 1 smoke 완료: container `Up`, UI/API 200, SMTP 1025 연결 확인. 실제 가격 알림 메일은 2번 price alert email 구현 후 연동 |
+| RabbitMQ | 완료 | Sprint 1 smoke 완료: container `Up`, management API 200, queue 0개 확인. 실제 작업 등록/처리는 3번 AI 견적 추천 실행 작업 또는 2번 부품 가격 수집 작업 구현 후 연동 |
+| Mailpit | 완료 | Sprint 1 smoke 완료: container `Up`, UI/API 200, SMTP 1025 연결 확인. 실제 가격 알림 메일은 2번 가격 알림 메일 구현 후 연동 |
 | CI/GitHub Actions | 완료 | frontend build/test, OpenAPI, backend bootJar, compose config, health smoke 구성 완료 |
 | k6/부하 테스트 | 진행중 | `infra/k6/smoke.js` skeleton과 `docs/reports/k6-smoke-report-template.md` 있음. 300명/1000명 부하 시나리오 확장은 별도 작업 |
 | 테스트/검증 | 완료 | `npm build/test`, `gradlew test/bootJar`, OpenAPI validation, compose config, Docker Compose runtime health 검증 완료 |
@@ -52,7 +52,7 @@ Figma 기준으로 5번이 직접 맡아야 할 화면은 `153:1880 STATE-15 ADM
 
 | 기능 단위 | 상태 | 최신 판단 |
 | --- | --- | --- |
-| JWT/Token 연동 | 진행중 | 현재 admin/user API는 demo token skeleton이다. 1번 JWT 구현 후 admin API 권한 분기를 실제 security 정책으로 전환할지 검토 필요 |
+| JWT/Token 연동 | 진행중 | 현재 admin/user API는 seed 사용자 비밀번호 검증과 JWT access token을 사용한다. Spring Security filter 전환 여부는 후속 작업에서 검토한다. |
 | Auth Error 연동 | 진행중 | `ApiExceptionHandler`의 401/403 `ErrorResponse`는 완료. 400 validation, 409 duplicate, refresh/logout 오류 shape는 1번 Auth 구현 후 검토 필요 |
 | AdminDashboard | 완료 | `GET /api/admin/dashboard`가 OpenAPI DTO 기준 필드와 일치한다. 계약 변경 시 계속 동시 검토 필요 |
 | Admin Audit Logs | 완료 | `GET /api/admin/audit-logs/recent` 응답 shape, seed 조회, 권한 테스트, 프론트 표시 연결 완료 |
@@ -65,8 +65,8 @@ Figma 기준으로 5번이 직접 맡아야 할 화면은 `153:1880 STATE-15 ADM
 | --- | --- | --- |
 | Docker Compose | 완료 | `docker compose config`, `docker compose up --build`, web/API/postgres/redis/rabbitmq/mailpit 기동, health 응답 확인 완료 |
 | Redis | 완료 | Sprint 1 smoke 완료. 실제 사용 후보는 OAuth one-time code, LLM/RAG cache, quota, job state |
-| RabbitMQ | 완료 | Sprint 1 smoke 완료. queue naming 초안: `agent.jobs`, `price.jobs`, `mail.jobs` |
-| Mailpit | 완료 | Sprint 1 smoke 완료. 실제 사용 후보는 price alert email |
+| RabbitMQ | 완료 | Sprint 1 smoke 완료. 작업 대기열 이름 초안: `agent.jobs`, `price.jobs`, `mail.jobs` |
+| Mailpit | 완료 | Sprint 1 smoke 완료. 실제 사용 후보는 가격 알림 메일 |
 | CI/GitHub Actions | 완료 | web build/test, OpenAPI 검증, API test/bootJar, compose config, Docker build, API runtime smoke 구성 완료 |
 | k6/부하 테스트 | 진행중 | smoke script와 smoke report template 완료. 300명/1000명 부하 시나리오 확장은 별도 작업 |
 | 테스트/검증 | 완료 | frontend/backend/OpenAPI/compose/runtime health 검증 기록 완료 |
@@ -179,7 +179,7 @@ Figma 기준으로 5번이 직접 맡아야 할 화면은 `153:1880 STATE-15 ADM
 - [x] `adminApi.ts`에 `AdminDashboard` 타입이 있다.
 - [x] 백엔드 `GET /api/admin/dashboard` endpoint가 있다.
 - [x] 백엔드 `GET /api/admin/audit-logs/recent` endpoint가 있다.
-- [x] 백엔드 admin endpoint에서 `requireAdmin()`으로 demo admin token을 검사한다.
+- [x] 백엔드 admin endpoint에서 `CurrentUserService.requireAdmin()`으로 JWT와 `ADMIN` role을 검사한다.
 - [x] `AdminDashboard` DTO 정합성은 백엔드/OpenAPI 계약 기준으로 프론트를 맞추기로 결정했다.
 - [x] `adminApi.ts`의 `AdminDashboard` 타입을 `agentRunning`, `openTickets`, `priceJobsRunning`, `degraded`, `generatedAt` 기준으로 수정했다.
 - [x] `AdminDashboardPage.tsx` metric 표시를 실제 API 응답 필드 기준으로 수정했다.
@@ -201,12 +201,12 @@ Figma 기준으로 5번이 직접 맡아야 할 화면은 `153:1880 STATE-15 ADM
 - [x] 현재 구현된 `UserController` API skeleton 테스트를 작성했다. 테스트 파일: `apps/api/src/test/java/com/buildgraph/prototype/user/UserControllerTest.java`
 - [x] `POST /api/auth/login` skeleton response shape를 테스트했다.
 - [x] `POST /api/users` 신규/기존 사용자 response shape를 테스트했다.
-- [x] `GET /api/auth/me` demo token 응답과 token 없음 401 `ErrorResponse`를 테스트했다.
-- [x] 로그인/회원가입 완성도 점검 결과, 현재 구현은 완성 인증이 아니라 demo token 기반 skeleton임을 확인했다.
-- [x] `POST /api/auth/login`은 현재 password를 검증하지 않고 email 조회만으로 `demo-access-*` token을 반환한다.
-- [x] `POST /api/users`는 현재 실제 password hash가 아니라 고정 문자열 `seed-signup-password-hash`를 저장한다.
-- [x] `GET /api/auth/me`는 JWT 검증이 아니라 `Bearer demo-access-*` 문자열 포함 여부로 admin/user를 판정한다.
-- [x] `/login`, `/signup` 화면은 렌더링 smoke test는 통과하지만 실제 입력값을 읽지 않고 고정 email/password로 API를 호출한다.
+- [x] `GET /api/auth/me` JWT 응답과 token 없음 401 `ErrorResponse`를 테스트했다.
+- [x] 로그인/회원가입 점검 결과, 현재 구현은 seed 사용자 비밀번호 검증과 JWT access token 발급/검증 흐름을 사용한다.
+- [x] `POST /api/auth/login`은 password hash를 검증하고 JWT access token을 반환한다.
+- [x] `POST /api/users`는 입력 password를 hash로 저장한다.
+- [x] `GET /api/auth/me`는 JWT를 검증하고 subject의 `users.public_id`로 현재 사용자를 조회한다.
+- [x] `/login`, `/signup` 화면은 실제 입력값을 읽어 Auth API를 호출한다.
 - [x] password hashing, login password verification, JWT 발급/검증, refresh token hash 저장/회전, logout revoke, validation error shape, duplicate email 409 처리는 1번 Auth/User 백엔드 작업으로 이관했다.
 - [x] OpenAPI에 있는 `POST /api/auth/refresh`, `POST /api/auth/logout`, `GET /api/auth/google/start`, `GET /api/auth/google/callback`, `POST /api/auth/exchange` 구현은 1번에게 이관했다.
 - [x] 5번은 1번 Auth 구현 후 `api.ts`, `RequireAdmin`, admin guard, API 계약 충돌 여부를 검토한다.
@@ -233,9 +233,9 @@ Figma 기준으로 5번이 직접 맡아야 할 화면은 `153:1880 STATE-15 ADM
 - [x] `buildgraph-web`에서 Vite dev server가 `0.0.0.0:5173`으로 기동되는 것을 확인했다.
 - [x] `buildgraph-api`에서 Spring Boot, DB 연결, Flyway migration validation이 정상 완료되는 것을 확인했다.
 - [x] `http://localhost:8080/api/health`와 `http://localhost:5173/api/health`가 모두 `{"status":"UP","database":"UP"}`를 반환함을 확인했다.
-- [x] 관리자 화면의 브라우저 로딩 원인이 Docker/API hang이 아니라 브라우저 localStorage의 오래된 demo token 불일치일 수 있음을 확인했다.
-- [x] 백엔드 demo admin token 기준이 `demo-access-admin`이고, 이전 테스트용 `demo-jwt-admin`은 401을 반환함을 확인했다.
-- [x] 관리자 화면 수동 확인 시 `localStorage.setItem('buildgraph.token', 'demo-access-admin')` 후 reload가 필요할 수 있음을 정리했다.
+- [x] 관리자 화면의 브라우저 로딩 원인이 Docker/API hang이 아니라 브라우저 localStorage의 오래된 token 불일치일 수 있음을 확인했다.
+- [x] 백엔드 admin 인증 기준은 `admin@example.com` 로그인으로 발급받은 JWT access token이며, legacy 문자열 token은 401을 반환함을 확인했다.
+- [x] 관리자 화면 수동 확인 시 로그인 화면에서 `admin@example.com / passw0rd!`로 로그인한 뒤 `/admin`에 접근해야 함을 정리했다.
 
 ## 해야 할 일
 
@@ -290,7 +290,7 @@ Figma 기준으로 5번이 직접 맡아야 할 화면은 `153:1880 STATE-15 ADM
 - [x] `153:1880` 기준으로 degraded alert frame을 추가한다.
 - [x] metric card 4개를 실제 API/계약에 맞게 다시 배치한다.
 - [x] `최근 Agent 세션` 영역은 3번 데이터와 경계를 확인한 뒤 summary 수준으로만 둔다.
-- [x] `운영 작업` 영역은 price job, email, mock-worker, k6-report 중 어떤 값을 5번이 표시할지 결정한다.
+- [x] `운영 작업` 영역은 부품 가격 수집 작업, 메일 발송 확인, Mock Worker, k6 Smoke 리포트 중 어떤 값을 5번이 표시할지 결정한다.
 - [x] `관리자 할 일` table은 각 도메인 owner 데이터가 필요한지 확인한다.
 - [x] 5번 단독으로 만들 수 없는 도메인 데이터는 mock summary 또는 link frame으로만 둔다.
 
@@ -338,14 +338,14 @@ AdminShell nav 분석 결과:
 - [x] password hashing, login password verification, JWT 발급/검증, refresh token hash 저장/회전/폐기, duplicate email 409, Auth validation error 구현은 1번에게 이관한다.
 - [ ] 1번 Auth API 구현 후 `apps/web/src/lib/api.ts`의 Authorization header/token 저장 정책과 충돌 없는지 확인한다.
 - [ ] 1번 Auth API 구현 후 `RequireAdmin`이 실제 JWT/role 기반 `/api/auth/me` 응답과 맞는지 확인한다.
-- [ ] 1번 Auth API 구현 후 admin API 권한 분기를 demo token에서 실제 JWT/security 정책으로 전환할지 결정한다.
+- [ ] Spring Security filter 도입 시 admin API 권한 분기를 현재 `CurrentUserService` 기반 JWT 검사에서 filter 기반 정책으로 전환할지 결정한다.
 - [ ] Auth API 계약 변경 시 `docs/API_CONTRACT.md`와 `docs/openapi.yaml`의 오류 응답/예시를 1번 변경과 같이 검토한다.
 - [x] 401과 403 메시지를 더 명확히 분리한다. 프론트는 로그인 필요/관리자 권한 없음 메시지를 분리하고, 백엔드는 `UNAUTHORIZED`/`FORBIDDEN` 응답을 분리한다.
 - [x] token이 만료되었을 때 `clearToken()`을 호출할지 결정한다. 결정: protected API에서 refresh 재시도까지 실패하거나 refresh가 없는 상태의 401이면 access token을 정리한다.
 - [x] refresh retry를 `api.ts` 공통에 둘지, 1번 Auth flow 내부에 둘지 결정한다. 결정: refresh endpoint/응답 정책은 1번이 구현하고, 공통 재시도 wrapper는 `api.ts`에 최대 1회만 둔다.
 - [x] `/api/auth/logout` 호출 후 프론트 token 정리 흐름을 정한다. 결정: 1번이 logout API를 호출하고, 성공 또는 강제 로그아웃 시 5번 helper인 `clearToken()`으로 로컬 token을 정리한다.
 - [x] OAuth callback/exchange는 1번 구현 범위이며, 5번은 token 저장/전달 연동만 검토한다.
-- [x] AdminController demo token 검사 방식에서 실제 JWT 검증으로 넘어갈 위치를 문서화한다. 전환 위치는 `config/security`/JWT filter, `GET /api/auth/me`, `RequireAdmin`, `apps/web/src/lib/api.ts` 연동 지점이다.
+- [x] AdminController 인증 검사 방식에서 Spring Security JWT filter로 넘어갈 위치를 문서화한다. 전환 위치는 `config/security`/JWT filter, `GET /api/auth/me`, `RequireAdmin`, `apps/web/src/lib/api.ts` 연동 지점이다.
 
 #### Common API Client 정책 결정
 
@@ -357,7 +357,7 @@ AdminShell nav 분석 결과:
 | refresh retry | `api.ts` 공통 wrapper에서 요청당 최대 1회만 허용 | `/api/auth/login`, `/api/auth/refresh`, `/api/auth/logout`, `/api/auth/exchange`는 retry 제외 |
 | logout | 1번 Auth flow가 logout API를 호출하고, 프론트 token 정리는 `clearToken()` 사용 | logout API 실패 시에도 강제 로컬 로그아웃이 필요한지 1번 PR에서 최종 확인 |
 | error normalization | `ApiError`가 backend `ErrorResponse`의 `code`, `message`, `details`, `status`를 보존하는 방향 | 공통 `ErrorResponse` 세부 field가 변경되면 `API_CONTRACT.md`/`openapi.yaml` 동시 수정 |
-| admin guard | `RequireAdmin`은 `getToken()` 확인 후 `/api/auth/me`의 `role`을 기준으로 판단 | 1번 JWT 구현 후 demo token 의존 제거와 security chain 전환 검토 |
+| admin guard | `RequireAdmin`은 `getToken()` 확인 후 `/api/auth/me`의 `role`을 기준으로 판단 | security chain 전환 검토 |
 
 ### 7. Backend/Admin/Health
 
@@ -371,8 +371,8 @@ AdminShell nav 분석 결과:
 
 - [x] Postgres Docker init SQL 주입을 제거해 Flyway schema history 충돌 원인을 없앤다.
 - [x] Redis를 Sprint 1에서 연결 확인만 할지 실제 기능에 쓸지 결정한다. 결정: Sprint 1은 연결 확인과 사용 정책 문서화까지만 진행하고, 실제 사용은 OAuth/cache/quota/job state 구현 PR에서 연동한다.
-- [x] RabbitMQ를 Agent job, price job, mail job 중 어디까지 검증할지 결정한다. 결정: Sprint 1은 기동/관리 화면/connection smoke와 queue naming 초안까지만 진행하고, 실제 publish/consume은 3번 Agent job 또는 2번 price job 구현 PR에서 연동한다.
-- [x] Mailpit은 실행 확인만 할지 실제 메일 발송까지 할지 결정한다. 결정: Sprint 1은 UI/SMTP 확인과 test mail smoke 방식 정리까지 진행하고, 실제 가격 알림 메일은 2번 price alert email 구현 PR에서 연동한다.
+- [x] RabbitMQ를 AI 견적 추천 실행 작업, 부품 가격 수집 작업, 메일 발송 작업 중 어디까지 검증할지 결정한다. 결정: Sprint 1은 기동/관리 화면/connection smoke와 작업 대기열 이름 초안까지만 진행하고, 실제 작업 등록/처리는 3번 AI 견적 추천 실행 작업 또는 2번 부품 가격 수집 작업 구현 PR에서 연동한다.
+- [x] Mailpit은 실행 확인만 할지 실제 메일 발송까지 할지 결정한다. 결정: Sprint 1은 UI/SMTP 확인과 test mail smoke 방식 정리까지 진행하고, 실제 가격 알림 메일은 2번 가격 알림 메일 구현 PR에서 연동한다.
 
 #### Redis Sprint 1 작업
 
@@ -393,12 +393,13 @@ AdminShell nav 분석 결과:
 - [x] `apps/api/build.gradle`에 `spring-boot-starter-amqp` 의존성이 있음을 확인했다.
 - [x] `docker compose up --build` 기준 `buildgraph-rabbitmq` 컨테이너가 `Up` 상태임을 확인했다.
 - [x] RabbitMQ 관리 화면 접속을 확인한다. 주소: `http://localhost:15672`, 계정: `buildgraph` / `buildgraph`. 확인: management API `/api/overview`가 200으로 응답했다.
-- [x] RabbitMQ connection smoke 방식을 정한다. 결정: Sprint 1은 management API 확인과 `/api/queues` 조회로 끝내고 테스트용 queue declare는 하지 않는다.
-- [x] queue naming 초안을 문서화한다. 초안: `agent.jobs`, `price.jobs`, `mail.jobs`.
-- [x] Sprint 1에서는 실제 consumer/worker를 임의 구현하지 않는다고 기록한다.
+- [x] RabbitMQ connection smoke 방식을 정한다. 결정: Sprint 1은 management API 확인과 `/api/queues` 조회로 끝내고 테스트용 작업 대기열 선언은 하지 않는다.
+- [x] 작업 대기열 이름 초안을 문서화한다. 초안: `agent.jobs`, `price.jobs`, `mail.jobs`.
+- [x] Sprint 1에서는 실제 작업 처리 worker를 임의 구현하지 않는다고 기록한다.
 - [x] 현재 RabbitMQ queue가 없는 상태를 확인했다. 결과: `/api/queues` 응답 `[]`.
-- [ ] 3번이 Agent job을 구현하면 Agent 상태 전이 `QUEUED -> RUNNING -> ...`와 queue ack/retry 정책을 같이 검토한다.
-- [ ] 2번이 price job을 구현하면 `POST /api/admin/price-jobs/run` 이후 queue publish, 중복 실행 409, worker 실패 처리 정책을 같이 검토한다.
+- [ ] 3번이 AI 견적 추천 실행 작업을 구현하면 추천 상태 전이 `QUEUED(대기) -> RUNNING(처리 중) -> RAG_SEARCHED(근거 검색 완료) -> TOOLS_CALLED(검증 완료) -> SUMMARY_READY(요약 완료) -> SUCCEEDED(완료)`와 `FALLBACK_READY`, `FAILED`, `CANCELLED` 처리 기준을 같이 검토한다.
+- [ ] 3번이 AI 견적 추천 실행 작업을 RabbitMQ에 연결하면 `agent.jobs` 작업 등록, 작업 처리기 성공 확인(ack), 일시 실패 재시도, 최종 실패 기록 정책을 같이 검토한다.
+- [ ] 2번이 부품 가격 수집 작업을 구현하면 `POST /api/admin/price-jobs/run` 이후 `price_jobs` 생성, `price.jobs` 작업 등록, 이미 실행 중인 가격 수집 중복 요청 409, 작업 처리기 실패 시 `FAILED`와 `error_summary` 기록 정책을 같이 검토한다.
 - [ ] mail job이 필요해지면 가격 알림 메일과 연결할지, RabbitMQ 없이 동기 smoke로 둘지 결정한다.
 
 #### Mailpit Sprint 1 작업
@@ -409,12 +410,12 @@ AdminShell nav 분석 결과:
 - [x] `docker compose up --build` 기준 `buildgraph-mailpit` 컨테이너가 `Up` 상태임을 확인했다.
 - [x] Mailpit UI 접속을 확인한다. 주소: `http://localhost:8025`. 확인: HTML title `Mailpit` 응답.
 - [x] Mailpit API 접속을 확인했다. 결과: `/api/v1/messages`가 200으로 응답하고 현재 message count는 0이다.
-- [x] SMTP smoke 방식을 정한다. 결정: Sprint 1은 SMTP 포트 연결 확인까지만 수행하고, 실제 test mail 발송은 price alert email 구현 전까지 보류한다.
+- [x] SMTP smoke 방식을 정한다. 결정: Sprint 1은 SMTP 포트 연결 확인까지만 수행하고, 실제 test mail 발송은 가격 알림 메일 구현 전까지 보류한다.
 - [x] SMTP 포트 연결을 확인했다. 결과: `nc -z localhost 1025` 성공.
 - [x] Sprint 1에서는 실제 사용자 메일 발송 로직을 5번이 임의 구현하지 않는다고 기록한다.
-- [ ] 2번이 price alert email을 구현하면 Mailpit으로 목표가 알림 메일 수신 여부를 확인한다.
+- [ ] 2번이 가격 알림 메일을 구현하면 Mailpit으로 목표가 알림 메일 수신 여부를 확인한다.
 - [ ] 1번이 회원가입 인증 메일을 요구하면 Auth owner와 API 계약을 먼저 확정한다.
-- [x] `docker compose up --build`로 전체 실행을 확인한다. 확인 범위: 컨테이너 기동, web/API 포트 응답, `/api/health`, Vite proxy health, 관리자 demo token 응답
+- [x] `docker compose up --build`로 전체 실행을 확인한다. 확인 범위: 컨테이너 기동, web/API 포트 응답, `/api/health`, Vite proxy health, 관리자 JWT 응답
 - [x] k6 smoke와 실제 부하 테스트 시나리오를 분리한다. 결정: Sprint 1 k6는 `infra/k6/smoke.js`와 `docs/reports/k6-smoke-report-template.md` 기준의 smoke 결과 기록으로 두고, 300명/1000명 부하는 별도 확장 작업으로 분리한다.
 - [x] 300명/1000명 목표가 이번 Sprint인지 이후 Sprint인지 확정한다. 결정: 300명은 2주차, 1,000명은 4주차 목표로 둔다.
 - [x] 성능 리포트 템플릿을 만든다. 파일: `docs/reports/k6-smoke-report-template.md`
@@ -461,6 +462,18 @@ AdminShell nav 분석 결과:
 - [x] `README.md`와 `ROUTE_OWNERSHIP.md`는 Auth/User 구현 owner 1번 기준과 2번의 parts/catalog refresh 확장 기준을 함께 반영했다.
 - [x] 충돌 marker 제거 후 `npm --prefix apps/web run build`와 `git diff --check`가 통과했다.
 
+#### Home UI 커밋 메시지 요청 기록
+
+- [x] 2026-06-30 기준 홈 화면 command center 개편, 공통 header/nav/screen 반응형 조정, body 최소 폭 제거, 홈 Playwright 테스트 추가 범위를 확인했다.
+- [x] 커밋 메시지에는 사용자 홈 화면 경험과 모바일 overflow 방지 검증을 함께 반영한다.
+- [x] 2026-06-30 추가 변경 기준 홈 화면 자연어 입력, 추천 모드 감지, 세션 저장, follow-up 상담, draggable assistant bar, 로컬 추천 카드 갱신 테스트 범위를 확인했다.
+- [x] 커밋 메시지에는 백엔드 추천 완성이 아니라 프론트 로컬 상담 시뮬레이션 흐름임을 명확히 반영한다.
+- [x] 2026-06-30 홈 챗봇 UX 개선 기준 assistant 답변 영역, 용도/해상도 칩 위저드, 추천 컴퓨터 카드 동시 갱신, 직접 입력 보조 흐름을 확인했다.
+- [x] 검증 결과: `./node_modules/.bin/tsc -b`, `npm --prefix apps/web run test -- home.spec.ts`, `npm --prefix apps/web run build` 통과.
+- [x] 2026-06-30 추가 UI 변경 기준 홈 첫 화면 추천 견적/인기 부품 랭킹, 셀프 견적 쇼핑 workspace, 공통 commerce 색상/패널/테이블/헤더 스타일, 모바일 셀프 견적 테스트 범위를 확인했다.
+- [x] 2026-06-30 추가 변경 기준 홈 화면의 빠른 쇼핑/상담 요약 보조 섹션 숨김과 Vite 개발 서버 API 프록시 대상 환경변수 분리 범위를 확인했다.
+- [x] 2026-06-30 `origin/main` 최신 변경을 `feat/improve-home-ui`에 병합하고, 숨긴 홈 보조 섹션 기준으로 Playwright 기대값을 정리했다. 검증: web build, web test 61개, OpenAPI 49 paths, backend test, backend bootJar, docker compose config 통과.
+
 ## 우선순위
 
 ### P0
@@ -487,7 +500,7 @@ AdminShell nav 분석 결과:
 
 ### P2
 
-- [ ] Redis/RabbitMQ/Mailpit 실제 기능 연동. 조건: OAuth one-time code, Agent job, price job, price alert email 중 해당 owner 구현 PR 발생
+- [ ] Redis/RabbitMQ/Mailpit 실제 기능 연동. 조건: OAuth one-time code, AI 견적 추천 실행 작업, 부품 가격 수집 작업, 가격 알림 메일 중 해당 owner 구현 PR 발생
 - [ ] 부하 테스트 300명/1000명 시나리오 확장
 - [ ] 1번 refresh/JWT 구현 후 5번 공통 API client/admin guard 연동 고도화
 
@@ -496,7 +509,7 @@ AdminShell nav 분석 결과:
 1. **1번 Auth 구현 후 5번 공통 연동 검토**
    - `apps/web/src/lib/api.ts`의 token 저장/전달 정책이 실제 access token/refresh token 응답과 맞는지 확인한다.
    - `RequireAdmin`이 실제 `/api/auth/me`의 role, 401, 403 응답과 맞는지 확인한다.
-   - admin API 권한 분기를 demo token 검사에서 Spring Security/JWT 정책으로 전환할지 결정한다.
+   - admin API 권한 분기를 현재 JWT service 검사에서 Spring Security/JWT filter 정책으로 전환할지 결정한다.
 
 2. **Common API Client 구현 고도화**
    - 1번 refresh/JWT 구현 후 `api.ts`에 최대 1회 refresh retry를 구현한다.
@@ -505,9 +518,9 @@ AdminShell nav 분석 결과:
 
 3. **Redis/RabbitMQ/Mailpit 실제 기능 연동 대기**
    - Sprint 1 smoke는 완료했다. Redis `PONG`, RabbitMQ management API 200, Mailpit UI/API/SMTP 응답 확인.
-   - RabbitMQ queue naming 초안은 `agent.jobs`, `price.jobs`, `mail.jobs`로 기록했다.
-   - 실제 Redis key schema, RabbitMQ queue declare/consumer, Mailpit 메일 발송 로직은 owner 구현 전까지 만들지 않는다.
-   - 1번 OAuth one-time code, 3번 Agent job, 2번 price job 또는 price alert email 구현 PR이 나오면 5번이 인프라 연동을 검토한다.
+   - RabbitMQ 작업 대기열 이름 초안은 `agent.jobs`, `price.jobs`, `mail.jobs`로 기록했다.
+   - 실제 Redis key schema, RabbitMQ 작업 대기열 선언/작업 처리기, Mailpit 메일 발송 로직은 owner 구현 전까지 만들지 않는다.
+   - 1번 OAuth one-time code, 3번 AI 견적 추천 실행 작업, 2번 부품 가격 수집 작업 또는 가격 알림 메일 구현 PR이 나오면 5번이 인프라 연동을 검토한다.
 
 4. **k6 확장 시나리오 분리**
    - 현재 완료된 것은 `infra/k6/smoke.js`와 `docs/reports/k6-smoke-report-template.md` 기준의 smoke 결과 기록이다.
@@ -527,7 +540,7 @@ AdminShell nav 분석 결과:
 | --- | --- | --- |
 | 로그인 토큰 공통 연결 | 1번이 로그인/JWT/로그아웃/구글 로그인을 만들면 `api.ts`, `RequireAdmin`, 관리자 권한 검사와 충돌 없는지 확인 | 대기 |
 | API 공통 호출 함수 | 로그인 만료 시 토큰 삭제, API 오류 응답 통일, refresh 재시도 1회 처리 | 1번 Auth 이후 |
-| 관리자 권한 검사 | demo token 방식에서 실제 JWT/Spring Security 방식으로 바꿀지 결정 | 1번 JWT 이후 |
+| 관리자 권한 검사 | 현재 JWT service 방식에서 Spring Security filter 방식으로 바꿀지 결정 | 후속 보안 정리 시점 |
 | 관리자 메뉴/레이아웃 | 관리자 메뉴 이름과 순서를 2/3/4번 담당자와 공유 | 바로 가능 |
 | 동시 접속 부하 테스트 | 300명/1000명 접속 상황 테스트 시나리오 만들기 | 남음 |
 | Redis 임시 저장소 | 구글 로그인 임시 코드, AI 결과 캐시, 사용량 제한 정책 검토 | 1번/3번 이후 |
