@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { type CSSProperties, type FormEvent, type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Activity,
@@ -11,12 +11,10 @@ import {
   GitBranch,
   HardDrive,
   LifeBuoy,
-  MessageCircle,
   Monitor,
   Move,
   SearchCheck,
   Send,
-  ShieldCheck,
   Sparkles,
   Zap,
   type LucideIcon
@@ -26,8 +24,11 @@ import type { BuildItem, BuildSummary, ToolResult } from '../types';
 import { builds } from '../mocks/quoteMock';
 
 const STORAGE_KEY = 'buildgraph.home.consultation';
+const ASSISTANT_BAR_ESTIMATED_HEIGHT = 260;
 
-type RecommendationMode = 'balanced' | 'gaming' | 'dev' | 'ai' | 'budget' | 'quiet';
+type RecommendationMode = 'balanced' | 'gaming' | 'dev' | 'ai' | 'budget' | 'quiet' | 'creative' | 'office';
+type WizardStep = 'usage' | 'resolution';
+type WizardAnswerKey = 'usage' | 'resolution';
 
 type ChatMessage = {
   id: string;
@@ -44,8 +45,20 @@ type AssistantPosition = {
 type ConsultationState = {
   prompt: string;
   mode: RecommendationMode;
+  headline: string;
+  wizardStep: WizardStep;
+  answers: Partial<Record<WizardAnswerKey, string>>;
+  recommendations: BuildSummary[];
   messages: ChatMessage[];
   assistantPosition: AssistantPosition;
+};
+
+type WizardOption = {
+  label: string;
+  answerKey: WizardAnswerKey;
+  mode: RecommendationMode;
+  nextStep: WizardStep;
+  assistant: string;
 };
 
 const starterPrompts = [
@@ -53,6 +66,24 @@ const starterPrompts = [
   { label: 'AI CUDA 실습', value: '300만원 안에서 CUDA 실습과 개발을 같이 할 수 있는 AI 학습용 PC 추천해줘.' },
   { label: '저소음 작업', value: '소음이 적고 안정적인 개발 작업용 PC를 220만원 안에서 맞춰줘.' },
   { label: '150만원 가성비', value: '150만원 안에서 FHD 게임과 문서 작업을 할 가성비 PC 추천해줘.' }
+];
+
+const INITIAL_ASSISTANT_REPLY = '추천 컴퓨터를 메인화면에 제공해드렸습니다. 혹시 어떤 용도로 사용하시나요?';
+
+const usageWizardOptions: WizardOption[] = [
+  { label: '게임', answerKey: 'usage', mode: 'gaming', nextStep: 'resolution', assistant: '게임용 기준으로 추천을 조정했습니다. 주로 어떤 해상도로 플레이하시나요?' },
+  { label: '개발', answerKey: 'usage', mode: 'dev', nextStep: 'usage', assistant: '개발 작업 기준으로 추천 컴퓨터를 다시 정리했습니다. IDE, Docker, 빌드 작업을 고려했습니다.' },
+  { label: 'AI/CUDA', answerKey: 'usage', mode: 'ai', nextStep: 'usage', assistant: 'AI/CUDA 실습 기준으로 추천 컴퓨터를 다시 정리했습니다. GPU와 VRAM 여유를 우선했습니다.' },
+  { label: '영상편집', answerKey: 'usage', mode: 'creative', nextStep: 'usage', assistant: '영상편집 기준으로 추천 컴퓨터를 다시 정리했습니다. CPU, RAM, SSD 작업 공간을 우선했습니다.' },
+  { label: '사무/학습', answerKey: 'usage', mode: 'office', nextStep: 'usage', assistant: '사무/학습 기준으로 추천 컴퓨터를 다시 정리했습니다. 안정성과 예산 효율을 우선했습니다.' },
+  { label: '저소음', answerKey: 'usage', mode: 'quiet', nextStep: 'usage', assistant: '저소음 기준으로 추천 컴퓨터를 다시 정리했습니다. 쿨링 소음과 전력 여유를 우선했습니다.' }
+];
+
+const resolutionWizardOptions: WizardOption[] = [
+  { label: 'FHD', answerKey: 'resolution', mode: 'gaming', nextStep: 'usage', assistant: 'FHD 기준으로 추천 컴퓨터를 다시 정리했습니다. 비용 효율과 프레임 안정성을 우선했습니다.' },
+  { label: 'QHD', answerKey: 'resolution', mode: 'gaming', nextStep: 'usage', assistant: 'QHD 기준으로 추천 컴퓨터를 다시 정리했습니다. GPU 성능과 전력 여유를 함께 반영했습니다.' },
+  { label: '4K', answerKey: 'resolution', mode: 'gaming', nextStep: 'usage', assistant: '4K 기준으로 추천 컴퓨터를 다시 정리했습니다. GPU와 VRAM 여유를 더 높게 보았습니다.' },
+  { label: '고주사율', answerKey: 'resolution', mode: 'gaming', nextStep: 'usage', assistant: '고주사율 기준으로 추천 컴퓨터를 다시 정리했습니다. GPU와 CPU 병목 가능성을 함께 반영했습니다.' }
 ];
 
 const quickCategories: Array<{ label: string; detail: string; to: string; icon: LucideIcon }> = [
@@ -107,6 +138,18 @@ const profileCopy: Record<RecommendationMode, { title: string; badge: string; su
     badge: '저소음',
     summary: '쿨링 소음, 전력 여유, 케이스 흡기 구조를 우선했습니다.',
     assistant: '쿨링 소음과 전력 여유를 우선해서 다시 정렬했습니다.'
+  },
+  creative: {
+    title: '영상편집 추천을 조정했습니다',
+    badge: '영상편집',
+    summary: 'CPU 멀티코어, RAM 용량, SSD 작업 공간을 우선했습니다.',
+    assistant: '영상편집 작업을 고려해 CPU, RAM, SSD 작업 공간 중심으로 정렬했습니다.'
+  },
+  office: {
+    title: '사무/학습 추천을 조정했습니다',
+    badge: '사무/학습',
+    summary: '문서 작업, 온라인 학습, 안정성과 예산 효율을 우선했습니다.',
+    assistant: '사무/학습 용도를 고려해 안정성과 비용 효율 중심으로 정렬했습니다.'
   }
 };
 
@@ -140,6 +183,16 @@ const recommendationTemplates: Record<RecommendationMode, Array<Pick<BuildSummar
     { name: '저소음 균형형', recommendedFor: '소음 우선', summary: '저발열 부품과 쿨링 여유를 우선한 추천입니다.', totalPrice: 2140000, confidence: 'HIGH', warning: '케이스 흡기 구조 확인' },
     { name: '저소음 작업형', recommendedFor: '작업 집중', summary: '장시간 개발 작업에서 소음과 발열을 낮추는 조합입니다.', totalPrice: 2060000, confidence: 'HIGH', warning: '팬 커브 설정 권장' },
     { name: '조용한 QHD 절충형', recommendedFor: '게임 절충', summary: 'QHD 게임 성능을 유지하면서 전력 소모를 낮췄습니다.', totalPrice: 1960000, confidence: 'MEDIUM', warning: '최고 옵션보다 저소음 우선' }
+  ],
+  creative: [
+    { name: '영상편집 균형형', recommendedFor: '편집 작업', summary: 'CPU 멀티코어와 RAM 여유를 우선한 편집용 추천입니다.', totalPrice: 2360000, confidence: 'HIGH', warning: '작업 SSD 용량 확인' },
+    { name: '4K 편집 확장형', recommendedFor: '4K 편집', summary: 'GPU 가속과 대용량 프로젝트 저장공간을 강화했습니다.', totalPrice: 2840000, confidence: 'MEDIUM', warning: '캐시 SSD 추가 권장' },
+    { name: '입문 편집 절충형', recommendedFor: '예산 절충', summary: '영상 편집 입문에 필요한 RAM과 저장공간을 우선했습니다.', totalPrice: 1780000, confidence: 'MEDIUM', warning: '장시간 렌더링 발열 확인' }
+  ],
+  office: [
+    { name: '사무/학습 안정형', recommendedFor: '안정성 우선', summary: '문서, 온라인 강의, 브라우저 작업에 맞춘 조용한 추천입니다.', totalPrice: 980000, confidence: 'HIGH', warning: '고사양 게임은 제외' },
+    { name: '학습 확장형', recommendedFor: '확장 여지', summary: '개발 입문과 학습 자료 저장공간을 조금 더 확보했습니다.', totalPrice: 1240000, confidence: 'MEDIUM', warning: 'GPU 작업은 제한적' },
+    { name: '최소 비용 사무형', recommendedFor: '비용 우선', summary: '일상 작업 중심으로 예산을 낮춘 구성입니다.', totalPrice: 820000, confidence: 'MEDIUM', warning: '업그레이드 여유 확인' }
   ]
 };
 
@@ -147,8 +200,6 @@ export function HomePage() {
   const [consultation, setConsultation] = useState<ConsultationState | null>(() => readStoredConsultation());
   const [starterInput, setStarterInput] = useState('');
   const [chatInput, setChatInput] = useState('');
-  const mode = consultation?.mode ?? 'balanced';
-  const recommendations = useMemo(() => buildRecommendations(mode), [mode]);
 
   useEffect(() => {
     if (consultation) {
@@ -168,10 +219,14 @@ export function HomePage() {
     setConsultation({
       prompt,
       mode: nextMode,
+      headline: INITIAL_ASSISTANT_REPLY,
+      wizardStep: 'usage',
+      answers: {},
+      recommendations: buildRecommendations(nextMode, {}),
       assistantPosition: defaultAssistantPosition(),
       messages: [
         createMessage('user', prompt, now),
-        createMessage('assistant', profileCopy[nextMode].assistant)
+        createMessage('assistant', INITIAL_ASSISTANT_REPLY)
       ]
     });
   }
@@ -184,15 +239,43 @@ export function HomePage() {
     if (!question) return;
 
     const nextMode = detectMode(`${consultation.prompt} ${question}`, consultation.mode);
+    const nextAnswers = inferAnswersFromText(question, consultation.answers);
+    const assistantReply = followUpAssistantReply(nextMode);
     setChatInput('');
     setConsultation({
       ...consultation,
       prompt: `${consultation.prompt} ${question}`,
       mode: nextMode,
+      headline: profileCopy[nextMode].title,
+      wizardStep: nextMode === 'gaming' ? 'resolution' : 'usage',
+      answers: nextAnswers,
+      recommendations: buildRecommendations(nextMode, nextAnswers),
       messages: [
         ...consultation.messages,
         createMessage('user', question),
-        createMessage('assistant', profileCopy[nextMode].assistant)
+        createMessage('assistant', assistantReply)
+      ]
+    });
+  }
+
+  function selectWizardOption(option: WizardOption) {
+    if (!consultation) return;
+
+    const nextAnswers = {
+      ...consultation.answers,
+      [option.answerKey]: option.label
+    };
+    setConsultation({
+      ...consultation,
+      mode: option.mode,
+      headline: option.nextStep === 'resolution' ? '게임용 기준으로 추천을 조정했습니다' : profileCopy[option.mode].title,
+      wizardStep: option.nextStep,
+      answers: nextAnswers,
+      recommendations: buildRecommendations(option.mode, nextAnswers),
+      messages: [
+        ...consultation.messages,
+        createMessage('user', option.label),
+        createMessage('assistant', option.assistant)
       ]
     });
   }
@@ -218,15 +301,16 @@ export function HomePage() {
     <Screen>
       <ConsultingView
         consultation={consultation}
-        recommendations={recommendations}
         onReset={() => setConsultation(null)}
       />
       <AssistantBar
         messages={consultation.messages}
         value={chatInput}
         position={consultation.assistantPosition}
+        wizardOptions={wizardOptionsFor(consultation.wizardStep)}
         onChange={setChatInput}
         onSubmit={askFollowUp}
+        onWizardSelect={selectWizardOption}
         onPositionChange={updateAssistantPosition}
       />
     </Screen>
@@ -319,11 +403,9 @@ function StarterView({
 
 function ConsultingView({
   consultation,
-  recommendations,
   onReset
 }: {
   consultation: ConsultationState;
-  recommendations: BuildSummary[];
   onReset: () => void;
 }) {
   const copy = profileCopy[consultation.mode];
@@ -333,7 +415,7 @@ function ConsultingView({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="text-xs font-semibold text-slate-500">Home / AI PC consulting</div>
-          <h1 className="mt-2 break-keep text-3xl font-black text-slate-950">{copy.title}</h1>
+          <h1 className="mt-2 break-keep text-3xl font-black text-slate-950">{consultation.headline}</h1>
           <p className="mt-2 max-w-2xl break-keep text-sm leading-6 text-slate-600">{copy.summary}</p>
         </div>
         <button type="button" onClick={onReset} className="h-10 rounded border border-slate-300 bg-white px-4 text-sm font-bold text-slate-700 hover:border-brand-blue hover:text-brand-blue">
@@ -399,7 +481,7 @@ function ConsultingView({
             <Link to="/my/quotes" className="text-sm font-bold text-brand-blue hover:underline">내 견적함 보기</Link>
           </div>
           <div className="grid gap-3 md:grid-cols-3">
-            {recommendations.map((build) => (
+            {consultation.recommendations.map((build) => (
               <BuildPreviewCard key={`${consultation.mode}-${build.id}`} build={build} />
             ))}
           </div>
@@ -458,25 +540,29 @@ function AssistantBar({
   messages,
   value,
   position,
+  wizardOptions,
   onChange,
   onSubmit,
+  onWizardSelect,
   onPositionChange
 }: {
   messages: ChatMessage[];
   value: string;
   position: AssistantPosition;
+  wizardOptions: WizardOption[];
   onChange: (value: string) => void;
   onSubmit: (event: FormEvent) => void;
+  onWizardSelect: (option: WizardOption) => void;
   onPositionChange: (position: AssistantPosition) => void;
 }) {
   const dragState = useRef<{ offsetX: number; offsetY: number } | null>(null);
   const latestAssistantMessage = [...messages].reverse().find((message) => message.role === 'assistant');
 
   useEffect(() => {
-    function moveAssistant(event: PointerEvent) {
+    function moveAssistant(event: globalThis.PointerEvent) {
       if (!dragState.current || window.innerWidth < 768) return;
       const nextX = clamp(event.clientX - dragState.current.offsetX, 16, window.innerWidth - 760);
-      const nextY = clamp(event.clientY - dragState.current.offsetY, 96, window.innerHeight - 96);
+      const nextY = clamp(event.clientY - dragState.current.offsetY, 96, window.innerHeight - ASSISTANT_BAR_ESTIMATED_HEIGHT - 16);
       onPositionChange({ x: nextX, y: nextY });
     }
 
@@ -492,7 +578,7 @@ function AssistantBar({
     };
   }, [onPositionChange]);
 
-  function startDrag(event: React.PointerEvent<HTMLDivElement>) {
+  function startDrag(event: ReactPointerEvent<HTMLDivElement>) {
     if (window.innerWidth < 768) return;
     const rect = event.currentTarget.getBoundingClientRect();
     dragState.current = {
@@ -507,7 +593,7 @@ function AssistantBar({
       style={{
         '--assistant-left': `${position.x}px`,
         '--assistant-top': `${position.y}px`
-      } as React.CSSProperties}
+      } as CSSProperties}
       className="fixed bottom-3 left-3 right-3 z-30 md:bottom-auto md:left-[var(--assistant-left)] md:right-auto md:top-[var(--assistant-top)] md:w-[720px]"
     >
       <div onPointerDown={startDrag} className="cursor-grab rounded-3xl border border-slate-200 bg-white p-3 shadow-[0_18px_55px_rgba(15,23,42,0.18)] active:cursor-grabbing">
@@ -521,10 +607,26 @@ function AssistantBar({
                 BuildGraph Assistant
                 <Move size={13} className="hidden text-slate-400 md:block" />
               </div>
-              <p className="truncate text-xs text-slate-500">{latestAssistantMessage?.content ?? '추가 조건을 물어보세요.'}</p>
+              <p className="truncate text-xs text-slate-500">추천 조건을 고르면 메인 추천 컴퓨터가 바로 바뀝니다.</p>
             </div>
           </div>
           <StatusBadge status="ACTIVE" />
+        </div>
+        <div data-testid="assistant-answer" className="mb-3 rounded-2xl bg-slate-50 px-4 py-3 text-sm font-semibold leading-6 text-slate-800">
+          {latestAssistantMessage?.content ?? '추천 컴퓨터를 메인화면에 제공해드렸습니다. 혹시 어떤 용도로 사용하시나요?'}
+        </div>
+        <div data-testid="wizard-options" className="mb-3 flex flex-wrap gap-2">
+          {wizardOptions.map((option) => (
+            <button
+              key={`${option.answerKey}-${option.label}`}
+              type="button"
+              onClick={() => onWizardSelect(option)}
+              onPointerDown={(event) => event.stopPropagation()}
+              className="min-h-9 rounded-full border border-blue-100 bg-brand-pale px-3 text-xs font-black text-brand-blue transition hover:border-brand-blue hover:bg-white focus:outline-none focus:ring-4 focus:ring-blue-100"
+            >
+              {option.label}
+            </button>
+          ))}
         </div>
         <form onSubmit={onSubmit} className="flex items-end gap-2">
           <label className="sr-only" htmlFor="assistant-question">AI에게 추가 질문</label>
@@ -586,12 +688,17 @@ function Metric({ label, value, body }: { label: string; value: string; body: st
   );
 }
 
-function buildRecommendations(mode: RecommendationMode): BuildSummary[] {
+function wizardOptionsFor(step: WizardStep) {
+  return step === 'resolution' ? resolutionWizardOptions : usageWizardOptions;
+}
+
+function buildRecommendations(mode: RecommendationMode, answers: Partial<Record<WizardAnswerKey, string>> = {}): BuildSummary[] {
   return recommendationTemplates[mode].map((template, index) => {
     const base = builds[index % builds.length];
+    const resolutionPrefix = mode === 'gaming' && answers.resolution ? `${answers.resolution} ` : '';
     return {
       ...base,
-      name: template.name,
+      name: resolutionPrefix && !template.name.startsWith(resolutionPrefix) ? `${resolutionPrefix}${template.name}` : template.name,
       recommendedFor: template.recommendedFor,
       summary: template.summary,
       totalPrice: template.totalPrice,
@@ -608,7 +715,9 @@ function toolResultsFor(mode: RecommendationMode): ToolResult[] {
     ? '쿨러와 케이스 흡기 구조를 우선 확인합니다.'
     : mode === 'ai'
       ? 'GPU 길이와 권장 PSU 용량을 함께 확인합니다.'
-      : '호환성, 전력, 규격 검증을 통과했습니다.';
+      : mode === 'creative'
+        ? '장시간 렌더링 기준 발열과 저장공간 여유를 확인합니다.'
+        : '호환성, 전력, 규격 검증을 통과했습니다.';
 
   return [
     { tool: 'compatibility', status: 'PASS', confidence: 'HIGH', summary: 'CPU, 메인보드, RAM 조합 기준 호환됩니다.' },
@@ -621,10 +730,30 @@ function detectMode(text: string, fallback: RecommendationMode = 'balanced'): Re
   const normalized = text.toLowerCase();
   if (/저소음|조용|소음|무소음/.test(normalized)) return 'quiet';
   if (/ai|cuda|딥러닝|머신러닝|학습/.test(normalized)) return 'ai';
+  if (/영상|편집|렌더|프리미어|다빈치/.test(normalized)) return 'creative';
+  if (/사무|학습|강의|문서|엑셀|office/.test(normalized)) return 'office';
   if (/qhd|게임|game|고주사율|fps/.test(normalized)) return 'gaming';
   if (/개발|코딩|docker|도커|ide|빌드/.test(normalized)) return 'dev';
   if (/150|가성비|저렴|최소|예산 낮/.test(normalized)) return 'budget';
   return fallback;
+}
+
+function inferAnswersFromText(text: string, answers: Partial<Record<WizardAnswerKey, string>>) {
+  const mode = detectMode(text);
+  const nextAnswers = { ...answers };
+  if (mode !== 'balanced') {
+    nextAnswers.usage = profileCopy[mode].badge;
+  }
+  if (/fhd/i.test(text)) nextAnswers.resolution = 'FHD';
+  if (/qhd/i.test(text)) nextAnswers.resolution = 'QHD';
+  if (/4k/i.test(text)) nextAnswers.resolution = '4K';
+  if (/고주사율|fps/i.test(text)) nextAnswers.resolution = '고주사율';
+  return nextAnswers;
+}
+
+function followUpAssistantReply(mode: RecommendationMode) {
+  if (mode === 'gaming') return '게임용 기준으로 추천을 조정했습니다. 주로 어떤 해상도로 플레이하시나요?';
+  return `${profileCopy[mode].badge} 기준으로 추천 컴퓨터를 다시 정리했습니다. ${profileCopy[mode].assistant}`;
 }
 
 function createMessage(role: ChatMessage['role'], content: string, createdAt = new Date().toISOString()): ChatMessage {
@@ -642,8 +771,16 @@ function readStoredConsultation(): ConsultationState | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as ConsultationState;
     if (!parsed.prompt || !parsed.mode || !Array.isArray(parsed.messages)) return null;
+    const answers = parsed.answers ?? {};
+    const recommendations = Array.isArray(parsed.recommendations) && parsed.recommendations.length > 0
+      ? parsed.recommendations
+      : buildRecommendations(parsed.mode, answers);
     return {
       ...parsed,
+      headline: parsed.headline ?? profileCopy[parsed.mode].title,
+      wizardStep: parsed.wizardStep ?? 'usage',
+      answers,
+      recommendations,
       assistantPosition: parsed.assistantPosition ?? defaultAssistantPosition()
     };
   } catch {
@@ -657,7 +794,7 @@ function defaultAssistantPosition(): AssistantPosition {
   }
   return {
     x: Math.max(16, Math.floor(window.innerWidth / 2 - 360)),
-    y: Math.max(96, window.innerHeight - 120)
+    y: Math.max(96, window.innerHeight - ASSISTANT_BAR_ESTIMATED_HEIGHT - 16)
   };
 }
 

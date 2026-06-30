@@ -467,6 +467,8 @@ AdminShell nav 분석 결과:
 - [x] 커밋 메시지에는 사용자 홈 화면 경험과 모바일 overflow 방지 검증을 함께 반영한다.
 - [x] 2026-06-30 추가 변경 기준 홈 화면 자연어 입력, 추천 모드 감지, 세션 저장, follow-up 상담, draggable assistant bar, 로컬 추천 카드 갱신 테스트 범위를 확인했다.
 - [x] 커밋 메시지에는 백엔드 추천 완성이 아니라 프론트 로컬 상담 시뮬레이션 흐름임을 명확히 반영한다.
+- [x] 2026-06-30 홈 챗봇 UX 개선 기준 assistant 답변 영역, 용도/해상도 칩 위저드, 추천 컴퓨터 카드 동시 갱신, 직접 입력 보조 흐름을 확인했다.
+- [x] 검증 결과: `./node_modules/.bin/tsc -b`, `npm --prefix apps/web run test -- home.spec.ts`, `npm --prefix apps/web run build` 통과.
 
 ## 우선순위
 

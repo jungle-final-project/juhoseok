@@ -51,6 +51,11 @@ test('keeps the home command center usable on mobile width', async ({ page }) =>
   await expect(main.getByRole('heading', { name: '어떤 PC 견적이 필요하세요?' })).toBeVisible();
   await expect(main.getByRole('button', { name: '견적 상담 시작' })).toBeVisible();
 
+  await main.getByRole('textbox', { name: '원하는 PC 사양 입력' }).fill('300만원 안에 예산으로 컴퓨터를 맞추고 싶어');
+  await main.getByRole('button', { name: '견적 상담 시작' }).click();
+  await expect(page.getByTestId('assistant-bar')).toBeVisible();
+  await expect(page.getByTestId('wizard-options').getByRole('button', { name: '게임' })).toBeVisible();
+
   const hasBodyOverflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
   expect(hasBodyOverflow).toBe(false);
 });
@@ -59,17 +64,38 @@ test('starts a local consultation and renders simulated recommendations', async 
   await openHomeAsUser(page);
   const main = page.getByRole('main');
 
-  await main.getByRole('textbox', { name: '원하는 PC 사양 입력' }).fill('200만원 안에서 QHD 게임과 개발을 같이 할 PC 추천해줘. NVIDIA 선호.');
+  await main.getByRole('textbox', { name: '원하는 PC 사양 입력' }).fill('300만원 안에 예산으로 컴퓨터를 맞추고 싶어');
   await main.getByRole('button', { name: '견적 상담 시작' }).click();
 
-  await expect(main.getByRole('heading', { name: 'QHD 게임 추천을 조정했습니다' })).toBeVisible();
-  await expect(main.getByText('QHD 게임 균형형')).toBeVisible();
+  await expect(main.getByRole('heading', { name: '추천 컴퓨터를 메인화면에 제공해드렸습니다' })).toBeVisible();
+  await expect(main.getByText('균형형 표준 견적')).toBeVisible();
   await expect(main.getByText('Tool 검증')).toBeVisible();
   await expect(page.getByTestId('assistant-bar')).toBeVisible();
+  await expect(page.getByTestId('assistant-answer')).toContainText('추천 컴퓨터를 메인화면에 제공해드렸습니다');
+  await expect(page.getByTestId('wizard-options').getByRole('button', { name: '게임' })).toBeVisible();
+  await expect(page.getByTestId('wizard-options').getByRole('button', { name: 'AI/CUDA' })).toBeVisible();
   await expect(page.getByRole('textbox', { name: 'AI에게 추가 질문' })).toBeVisible();
 });
 
-test('updates recommendation cards from a follow-up chat question', async ({ page }) => {
+test('updates recommendation cards from wizard choices', async ({ page }) => {
+  await openHomeAsUser(page);
+  const main = page.getByRole('main');
+
+  await main.getByRole('textbox', { name: '원하는 PC 사양 입력' }).fill('300만원 안에 예산으로 컴퓨터를 맞추고 싶어');
+  await main.getByRole('button', { name: '견적 상담 시작' }).click();
+
+  await page.getByTestId('wizard-options').getByRole('button', { name: '게임' }).click();
+  await expect(page.getByTestId('assistant-answer')).toContainText('게임용 기준으로 추천을 조정했습니다');
+  await expect(page.getByTestId('wizard-options').getByRole('button', { name: 'FHD' })).toBeVisible();
+  await expect(page.getByTestId('wizard-options').getByRole('button', { name: 'QHD' })).toBeVisible();
+  await expect(main.getByText('QHD 게임 균형형')).toBeVisible();
+
+  await page.getByTestId('wizard-options').getByRole('button', { name: 'QHD' }).click();
+  await expect(page.getByTestId('assistant-answer')).toContainText('QHD 기준으로 추천 컴퓨터를 다시 정리했습니다');
+  await expect(main.getByText('QHD 고주사율 확장형')).toBeVisible();
+});
+
+test('keeps follow-up text input as a secondary assistant path', async ({ page }) => {
   await openHomeAsUser(page);
   const main = page.getByRole('main');
 
@@ -80,7 +106,8 @@ test('updates recommendation cards from a follow-up chat question', async ({ pag
 
   await expect(main.getByRole('heading', { name: '저소음 추천을 조정했습니다' })).toBeVisible();
   await expect(main.getByText('저소음 균형형')).toBeVisible();
-  await expect(page.getByText('쿨링 소음과 전력 여유를 우선해서 다시 정렬했습니다.')).toBeVisible();
+  await expect(page.getByTestId('assistant-answer')).toContainText('저소음 기준으로 추천 컴퓨터를 다시 정리했습니다');
+  await expect(page.getByTestId('wizard-options').getByRole('button', { name: '게임' })).toBeVisible();
 });
 
 test('lets desktop users drag the assistant bar', async ({ page }) => {
