@@ -238,6 +238,7 @@ Google OAuth 정책:
 | Method | Path | Auth | Owner | Request 예시 | Response 예시 | 관련 DB table |
 |---|---|---|---|---|---|---|
 | `GET` | `/api/parts` | USER | 2번 | `?category=GPU&q=5070&manufacturer=NVIDIA&status=ACTIVE&minPrice=500000&maxPrice=1300000&page=0&size=20&sort=price_desc` | `{ "items": [{ "id": "0e9f3b8b-8c83-4d9a-9f7d-1f2b4dfb8a11", "category": "GPU", "name": "GeForce RTX 5070", "manufacturer": "NVIDIA", "price": 960000, "status": "ACTIVE", "attributes": { "wattage": 250 }, "latestPriceSource": "MANUAL_CURRENT_LINEUP", "externalOffer": { "imageUrl": "https://...", "supplierName": "Naver Store", "offerUrl": "https://...", "lowPrice": 950000, "source": "NAVER_SHOPPING_SEARCH", "refreshedAt": "2026-06-29T10:25:00Z" } }], "page": 0, "size": 20, "total": 1 }` | `parts`, `price_snapshots`, `benchmark_summaries`, `part_external_offers` |
+| `POST` | `/api/parts/compatible-candidates` | USER | 2번 | `{ "source": "AI_BUILD", "category": "GPU", "items": [{ "partId": "0e9f3b8b-8c83-4d9a-9f7d-1f2b4dfb8a11", "category": "GPU", "quantity": 1 }], "limit": 5 }` | `{ "category": "GPU", "items": [{ "part": { "id": "0e9f3b8b-8c83-4d9a-9f7d-1f2b4dfb8a11", "category": "GPU", "name": "GeForce RTX 5070 Ti", "price": 990000, "status": "ACTIVE", "attributes": {} }, "status": "PASS", "statusLabel": "여유 있음", "summary": "현재 조합 기준 호환 가능합니다.", "checkedTools": ["power", "size", "performance"] }], "rejectedCount": 1, "warnings": [] }` | `parts`, `quote_drafts`, `quote_draft_items`, `benchmark_summaries` |
 | `GET` | `/api/parts/{id}` | USER | 2번 | - | `{ "id": "0e9f3b8b-8c83-4d9a-9f7d-1f2b4dfb8a11", "category": "GPU", "name": "GeForce RTX 5070", "manufacturer": "NVIDIA", "price": 960000, "status": "ACTIVE", "attributes": { "wattage": 250, "lengthMm": 304 }, "benchmarkSummary": { "summary": "GPU category-local normalized score 78.0 for gaming_ai_creator. Use as recommendation evidence, not exact FPS or render-time guarantee.", "score": 78.0 }, "latestPriceSource": "MANUAL_CURRENT_LINEUP", "externalOffer": null }` | `parts`, `price_snapshots`, `benchmark_summaries`, `part_external_offers` |
 | `GET` | `/api/parts/{id}/price-history` | USER | 2번 | `?days=3650&source=NAVER_SHOPPING_SEARCH&limit=120` | `{ "partId": "0e9f3b8b-8c83-4d9a-9f7d-1f2b4dfb8a11", "partName": "GeForce RTX 5070", "currentPrice": 960000, "days": 3650, "source": "NAVER_SHOPPING_SEARCH", "items": [{ "price": 950000, "source": "NAVER_SHOPPING_SEARCH", "collectedAt": "2026-06-29T10:25:00Z" }], "summary": { "sampleCount": 1, "currentPrice": 960000, "minPrice": 950000, "maxPrice": 950000, "changeAmount": 0, "changeRatePercent": 0.0 } }` | `parts`, `price_snapshots` |
 | `GET` | `/api/price-alerts` | USER | 2번 | `?page=0&size=20` | `{ "items": [{ "partId": "0e9f3b8b-8c83-4d9a-9f7d-1f2b4dfb8a11", "partName": "RTX 4070", "targetPrice": 700000, "currentPrice": 850000, "status": "ACTIVE", "createdAt": "2026-06-29T10:25:00Z" }], "page": 0, "size": 20, "total": 1 }` | `price_alerts`, `parts`, `users` |
@@ -256,6 +257,8 @@ Google OAuth 정책:
 부품 검색 정렬은 `category`, `price_asc`, `price_desc`, `name`만 허용한다. `q`는 `parts.name`, `parts.manufacturer`, `parts.attributes`를 대상으로 검색한다.
 
 `GET /api/parts`에서 `status`를 생략하면 쇼핑몰 기본 노출 기준인 `ACTIVE`만 반환한다. 구형 seed나 교체 후보 보관용 자산은 `status=INACTIVE` 또는 `status=DISCONTINUED`를 명시해 조회한다.
+
+`POST /api/parts/compatible-candidates`는 그래프 노드 클릭 시 현재 조합과 호환되는 같은 카테고리 후보를 계산한다. `source=AI_BUILD`는 request의 `items[].partId`만 신뢰하고 서버가 DB에서 가격/spec을 다시 조회한다. `source=QUOTE_DRAFT_CURRENT`는 request의 `items`를 무시하고 로그인 사용자의 현재 견적초안을 직접 읽는다. 후보는 현재 조합에서 해당 category만 교체해 `ToolCheckService`를 실행한 뒤 `PASS -> WARN`, 가격 낮은순으로 정렬한다. `FAIL` 후보는 기본 목록에서 제외하고 `rejectedCount`에 반영한다.
 
 외부 가격 수집 백업은 별도 public API를 만들지 않는다. 현재 단계에서는 `price_snapshots.source = "DANAWA_BACKUP"` 또는 최신 라인업 수동 seed용 `MANUAL_CURRENT_LINEUP`, `price_snapshots.raw_payload`, `parts.attributes.externalSources`에 키워드와 source metadata를 저장한다. 실제 크롤러/수집기는 관리자 가격 Job 내부 처리로만 붙인다.
 
@@ -559,6 +562,13 @@ AS AI Chat 규칙:
 | `PartDto` | `status` | `string` | no | `ACTIVE` |
 | `PartDto` | `attributes` | `object` | no | `{ "wattage": 200 }` |
 | `PartDto` | `externalOffer` | `object` | yes | `{ "imageUrl": "https://...", "supplierName": "Naver Store", "offerUrl": "https://...", "lowPrice": 950000, "source": "NAVER_SHOPPING_SEARCH", "refreshedAt": "2026-06-29T10:25:00Z" }` |
+| `CompatiblePartCandidateRequest` | `source` | `string` | no | `AI_BUILD` |
+| `CompatiblePartCandidateRequest` | `category` | `string` | no | `GPU` |
+| `CompatiblePartCandidateRequest` | `items` | `AiBuildItemDto[]` | yes | `[{ "partId": "0e9f3b8b-8c83-4d9a-9f7d-1f2b4dfb8a11", "category": "GPU", "quantity": 1 }]` |
+| `CompatiblePartCandidateResponse` | `items` | `CompatiblePartCandidateDto[]` | no | `[{ "statusLabel": "여유 있음" }]` |
+| `CompatiblePartCandidateDto` | `part` | `PartDto` | no | `{ "category": "GPU" }` |
+| `CompatiblePartCandidateDto` | `status` | `string` | no | `PASS` |
+| `CompatiblePartCandidateDto` | `summary` | `string` | no | `현재 조합 기준 호환 가능합니다.` |
 | `PriceAlertDto` | `partId` | `string` | no | `0e9f3b8b-8c83-4d9a-9f7d-1f2b4dfb8a11` |
 | `PriceAlertDto` | `partName` | `string` | no | `RTX 4070` |
 | `PriceAlertDto` | `targetPrice` | `number` | no | `700000` |

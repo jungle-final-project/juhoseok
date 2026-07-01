@@ -327,6 +327,25 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PartPage"
+  /api/parts/compatible-candidates:
+    post:
+      summary: 현재 조합 기준 호환 부품 후보
+      description: 그래프 노드 클릭 시 같은 카테고리 후보를 현재 AI_BUILD 또는 현재 견적초안 기준으로 Tool 검증해 반환한다. FAIL 후보는 기본 목록에서 제외하고 rejectedCount에 반영한다.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompatiblePartCandidateRequest"
+      responses:
+        "200":
+          description: 호환 후보 목록
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompatiblePartCandidateResponse"
   /api/parts/{id}:
     get:
       summary: 부품 상세
@@ -2021,6 +2040,72 @@ components:
           type: string
           format: date-time
           nullable: true
+    CompatiblePartCandidateRequest:
+      type: object
+      required: [source, category]
+      properties:
+        source:
+          $ref: "#/components/schemas/BuildGraphSource"
+        category:
+          $ref: "#/components/schemas/PartCategory"
+        items:
+          type: array
+          description: AI_BUILD source에서만 사용한다. QUOTE_DRAFT_CURRENT에서는 서버가 현재 로그인 사용자의 견적초안을 직접 읽는다.
+          items:
+            $ref: "#/components/schemas/CompatibleCandidateItemInput"
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 10
+          default: 5
+    CompatibleCandidateItemInput:
+      type: object
+      required: [partId, category, quantity]
+      properties:
+        partId:
+          type: string
+          format: uuid
+        category:
+          $ref: "#/components/schemas/PartCategory"
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 9
+    CompatiblePartCandidateResponse:
+      type: object
+      required: [category, items, rejectedCount, warnings]
+      properties:
+        category:
+          $ref: "#/components/schemas/PartCategory"
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CompatiblePartCandidateDto"
+        rejectedCount:
+          type: integer
+          minimum: 0
+        warnings:
+          type: array
+          items:
+            type: string
+    CompatiblePartCandidateDto:
+      type: object
+      required: [part, status, statusLabel, summary, checkedTools]
+      properties:
+        part:
+          $ref: "#/components/schemas/PartDto"
+        status:
+          $ref: "#/components/schemas/ToolStatus"
+        statusLabel:
+          type: string
+          enum: [여유 있음, 간섭 주의, 장착 불가]
+        summary:
+          type: string
+        checkedTools:
+          type: array
+          items:
+            type: string
+            enum: [compatibility, power, size, performance, price]
     QuoteDraftItemUpsertRequest:
       type: object
       description: CPU/GPU/MOTHERBOARD/PSU/CASE/COOLER are single-item categories. RAM and STORAGE can hold multiple distinct parts.

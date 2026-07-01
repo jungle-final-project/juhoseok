@@ -17,17 +17,20 @@ public class PartController {
     private final PartQueryService partQueryService;
     private final ToolCheckService toolCheckService;
     private final NaverShoppingOfferService naverShoppingOfferService;
+    private final PartCompatibleCandidateService compatibleCandidateService;
     private final CurrentUserService currentUserService;
 
     public PartController(
             PartQueryService partQueryService,
             ToolCheckService toolCheckService,
             NaverShoppingOfferService naverShoppingOfferService,
+            PartCompatibleCandidateService compatibleCandidateService,
             CurrentUserService currentUserService
     ) {
         this.partQueryService = partQueryService;
         this.toolCheckService = toolCheckService;
         this.naverShoppingOfferService = naverShoppingOfferService;
+        this.compatibleCandidateService = compatibleCandidateService;
         this.currentUserService = currentUserService;
     }
 
@@ -67,6 +70,15 @@ public class PartController {
     ) {
         currentUserService.requireUser(authorization);
         return partQueryService.priceHistory(id, days, source, limit);
+    }
+
+    @PostMapping("/parts/compatible-candidates")
+    Map<String, Object> compatibleCandidates(
+            @RequestBody(required = false) Map<String, Object> request,
+            @RequestHeader(value = "Authorization", required = false) String authorization
+    ) {
+        CurrentUserService.CurrentUser user = currentUserService.requireUser(authorization);
+        return compatibleCandidateService.compatibleCandidates(user, request);
     }
 
     @PostMapping("/admin/parts/external-offers/refresh")

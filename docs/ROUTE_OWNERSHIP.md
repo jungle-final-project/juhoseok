@@ -136,12 +136,12 @@ Auth 화면과 Auth/User API 구현 주 owner는 1번이다. 5번은 `apps/web/s
 
 | Route | 주 owner | 협업자 | 연결 API |
 |---|---|---|---|
-| `/` | 1번 | 2번 | `POST /api/ai/build-chat`, `POST /api/build-graphs/resolve`, `PUT /api/quote-drafts/current/apply-ai-build` |
+| `/` | 1번 | 2번 | `POST /api/ai/build-chat`, `POST /api/build-graphs/resolve`, `POST /api/parts/compatible-candidates`, `PUT /api/quote-drafts/current/apply-ai-build` |
 | `/requirements/new` | 1번 | 3번 | `POST /api/requirements/parse`, `POST /api/builds/recommend` |
 | `/builds/:buildId` | 1번 | 2번, 3번 | `GET /api/builds/{id}`, `GET /api/rag/evidence/{id}` |
 | `/builds/:buildId/change-part` | 1번 | 2번 | `POST /api/builds/{id}/change-part`, `GET /api/parts` |
 | `/my/quotes` | 1번 | 2번 | `GET /api/builds/history`, `GET /api/price-alerts`, `POST /api/price-alerts` |
-| `/self-quote` | 2번 | 1번, 5번 | `GET /api/parts`, `GET /api/parts/{id}/price-history`, `GET /api/quote-drafts/current`, `POST /api/build-graphs/resolve`, `PUT /api/quote-drafts/current/apply-ai-build`, `PUT/PATCH/DELETE /api/quote-drafts/current/items/{partId}`, 5개 Tool API |
+| `/self-quote` | 2번 | 1번, 5번 | `GET /api/parts`, `POST /api/parts/compatible-candidates`, `GET /api/parts/{id}/price-history`, `GET /api/quote-drafts/current`, `POST /api/build-graphs/resolve`, `PUT /api/quote-drafts/current/apply-ai-build`, `PUT/PATCH/DELETE /api/quote-drafts/current/items/{partId}`, 5개 Tool API |
 | `/checkout` | 2번 | 1번, 5번 | `GET /api/quote-drafts/current` |
 | `/checkout/complete` | 2번 | 1번, 5번 | 프론트 `sessionStorage` 데모 상태 |
 | `/parts/:partId` | 2번 | 5번 | `GET /api/parts/{id}`, `PUT /api/quote-drafts/current/items/{partId}` |
@@ -183,6 +183,7 @@ Auth 화면과 Auth/User API 구현 주 owner는 1번이다. 5번은 `apps/web/s
 | `GET /api/builds/history` | 1번 | - |
 | `POST /api/builds/{id}/change-part` | 1번 | 2번 |
 | `GET /api/parts` | 2번 | - |
+| `POST /api/parts/compatible-candidates` | 2번 | 1번 |
 | `GET /api/parts/{id}` | 2번 | - |
 | `GET /api/parts/{id}/price-history` | 2번 | 3번 |
 | `GET /api/quote-drafts/current` | 2번 | 5번 |
