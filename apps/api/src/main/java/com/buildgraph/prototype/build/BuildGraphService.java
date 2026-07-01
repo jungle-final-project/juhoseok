@@ -167,13 +167,23 @@ public class BuildGraphService {
         }
         addConstraintNodes(nodes, byCategory, toolByName, budget, total);
 
+        Map<String, Object> compatibilityDetails = toolDetails(toolByName, "compatibility");
+        Map<String, Object> powerDetails = toolDetails(toolByName, "power");
+        Map<String, Object> sizeDetails = toolDetails(toolByName, "size");
+        String socketStatus = socketStatus(byCategory, compatibilityDetails, toolStatus(toolByName, "compatibility"));
+        String memoryStatus = booleanStatus(booleanValue(compatibilityDetails.get("memoryTypeMatched")), toolStatus(toolByName, "compatibility"));
+        String coolerSocketStatus = booleanStatus(booleanValue(compatibilityDetails.get("coolerSocketMatched")), toolStatus(toolByName, "compatibility"));
+        String powerStatus = powerStatus(powerDetails, toolStatus(toolByName, "power"));
+        String gpuLengthStatus = lengthStatus(sizeDetails, "gpuLengthMm", "maxGpuLengthMm", toolStatus(toolByName, "size"));
+        String coolerHeightStatus = lengthStatus(sizeDetails, "coolerHeightMm", "maxCpuCoolerHeightMm", toolStatus(toolByName, "size"));
+
         List<Map<String, Object>> edges = new ArrayList<>();
-        addEdgeIfPossible(edges, byCategory, "CPU", "MOTHERBOARD", "edge-cpu-board-socket", "REQUIRES", toolStatus(toolByName, "compatibility"), "소켓", socketSummary(byCategory));
-        addEdgeIfPossible(edges, byCategory, "MOTHERBOARD", "RAM", "edge-board-ram-memory", "REQUIRES", toolStatus(toolByName, "compatibility"), "DDR 규격", memorySummary(byCategory));
-        addEdgeIfPossible(edges, byCategory, "CPU", "COOLER", "edge-cpu-cooler-socket", "REQUIRES", toolStatus(toolByName, "compatibility"), "쿨러 장착", coolerSummary(byCategory));
-        addEdgeIfPossible(edges, byCategory, "GPU", "PSU", "edge-gpu-psu-power", "AFFECTS", toolStatus(toolByName, "power"), "전력 여유", powerSummary(toolByName));
-        addEdgeIfPossible(edges, byCategory, "GPU", "CASE", "edge-gpu-case-length", "REQUIRES", toolStatus(toolByName, "size"), "장착 길이", gpuLengthSummary(toolByName));
-        addEdgeIfPossible(edges, byCategory, "COOLER", "CASE", "edge-cooler-case-height", "REQUIRES", toolStatus(toolByName, "size"), "쿨러 높이", coolerHeightSummary(toolByName));
+        addEdgeIfPossible(edges, byCategory, "CPU", "MOTHERBOARD", "edge-cpu-board-socket", "REQUIRES", socketStatus, socketLabel(socketStatus), socketSummary(byCategory, socketStatus));
+        addEdgeIfPossible(edges, byCategory, "MOTHERBOARD", "RAM", "edge-board-ram-memory", "REQUIRES", memoryStatus, "DDR 규격", memorySummary(byCategory, memoryStatus));
+        addEdgeIfPossible(edges, byCategory, "CPU", "COOLER", "edge-cpu-cooler-socket", "REQUIRES", coolerSocketStatus, "쿨러 소켓", coolerSummary(byCategory, coolerSocketStatus));
+        addEdgeIfPossible(edges, byCategory, "GPU", "PSU", "edge-gpu-psu-power", "AFFECTS", powerStatus, powerLabel(powerDetails, powerStatus), powerSummary(toolByName, powerStatus));
+        addEdgeIfPossible(edges, byCategory, "GPU", "CASE", "edge-gpu-case-length", "REQUIRES", gpuLengthStatus, gpuLengthLabel(sizeDetails, gpuLengthStatus), gpuLengthSummary(toolByName, gpuLengthStatus));
+        addEdgeIfPossible(edges, byCategory, "COOLER", "CASE", "edge-cooler-case-height", "REQUIRES", coolerHeightStatus, coolerHeightLabel(sizeDetails, coolerHeightStatus), coolerHeightSummary(toolByName, coolerHeightStatus));
         addEdgeIfPossible(edges, byCategory, "CPU", "GPU", "edge-cpu-gpu-performance", "AFFECTS", toolStatus(toolByName, "performance"), "작업 성능", toolSummary(toolByName, "performance", "CPU와 GPU 조합으로 작업 적합도를 확인합니다."));
         if (!parts.isEmpty()) {
             edges.add(edge("edge-budget-total-price", "constraint-budget", "constraint-total-price", "AFFECTS", toolStatus(toolByName, "price"), "예산", priceSummary(toolByName, budget, total)));
@@ -209,7 +219,7 @@ public class BuildGraphService {
                 "category", part.category(),
                 "label", part.name(),
                 "status", "PASS",
-                "detail", part.manufacturer() == null ? formatWon(firstNumber(part.price(), 0)) : part.manufacturer() + " · " + formatWon(firstNumber(part.price(), 0)),
+                "detail", nodeDetail(part),
                 "price", firstNumber(part.price(), 0)
         );
     }
@@ -338,19 +348,66 @@ public class BuildGraphService {
         );
     }
 
-    private static String socketSummary(Map<String, ToolBuildPart> byCategory) {
-        return "CPU " + attr(byCategory.get("CPU"), "socket") + " 소켓과 메인보드 " + attr(byCategory.get("MOTHERBOARD"), "socket") + " 소켓을 비교합니다.";
+    private static String nodeDetail(ToolBuildPart part) {
+        return switch (firstText(part.category(), "").toUpperCase(Locale.ROOT)) {
+            case "CPU" -> firstText(joinSpecs("소켓 " + attr(part, "socket")), fallbackPartDetail(part));
+            case "MOTHERBOARD" -> firstText(motherboardDetail(part), fallbackPartDetail(part));
+            case "RAM" -> firstText(joinSpecs(attrValue(part, "memoryType"), capacityDetail(part), moduleCountDetail(part)), fallbackPartDetail(part));
+            case "GPU" -> firstText(joinSpecs(wattageDetail(part), lengthDetail(part)), fallbackPartDetail(part));
+            case "PSU" -> firstText(psuCapacityDetail(part), fallbackPartDetail(part));
+            case "CASE" -> firstText(caseGpuLengthDetail(part), fallbackPartDetail(part));
+            case "COOLER" -> firstText(coolerDetail(part), fallbackPartDetail(part));
+            case "STORAGE" -> firstText(joinSpecs(storageInterfaceDetail(part), storageCapacityDetail(part)), fallbackPartDetail(part));
+            default -> fallbackPartDetail(part);
+        };
     }
 
-    private static String memorySummary(Map<String, ToolBuildPart> byCategory) {
-        return "RAM " + attr(byCategory.get("RAM"), "memoryType") + " 규격과 메인보드 " + attr(byCategory.get("MOTHERBOARD"), "memoryType") + " 지원 규격을 비교합니다.";
+    private static String motherboardDetail(ToolBuildPart part) {
+        List<String> specs = new ArrayList<>();
+        addIfPresent(specs, attrValue(part, "socket"));
+        addIfPresent(specs, attrValue(part, "memoryType"));
+        String wifi = firstText(attrValue(part, "wifi"), booleanAttr(part, "hasWifi") ? "Wi-Fi" : null);
+        addIfPresent(specs, wifi);
+        if (wifi != null || booleanAttr(part, "bluetooth")) {
+            specs.add("Bluetooth");
+        }
+        return String.join(" · ", specs);
     }
 
-    private static String coolerSummary(Map<String, ToolBuildPart> byCategory) {
-        return "CPU 소켓 " + attr(byCategory.get("CPU"), "socket") + "을 쿨러 장착 지원 목록과 비교합니다.";
+    private static String socketSummary(Map<String, ToolBuildPart> byCategory, String status) {
+        String cpuSocket = attr(byCategory.get("CPU"), "socket");
+        String boardSocket = attr(byCategory.get("MOTHERBOARD"), "socket");
+        String base = "CPU 소켓 " + cpuSocket + " / 메인보드 소켓 " + boardSocket + "입니다.";
+        if ("FAIL".equals(status)) {
+            return base + " 메인보드 소켓이 CPU와 맞지 않습니다.";
+        }
+        return base + " 소켓이 일치합니다.";
+    }
+
+    private static String memorySummary(Map<String, ToolBuildPart> byCategory, String status) {
+        String ramType = attr(byCategory.get("RAM"), "memoryType");
+        String boardType = attr(byCategory.get("MOTHERBOARD"), "memoryType");
+        String base = "RAM " + ramType + " / 메인보드 지원 " + boardType + "입니다.";
+        if ("FAIL".equals(status)) {
+            return base + " 메인보드 RAM 규격 확인이 필요합니다.";
+        }
+        return base + " DDR 규격이 맞습니다.";
+    }
+
+    private static String coolerSummary(Map<String, ToolBuildPart> byCategory, String status) {
+        String cpuSocket = attr(byCategory.get("CPU"), "socket");
+        String base = "CPU 소켓 " + cpuSocket + "을 쿨러 장착 지원 목록과 비교합니다.";
+        if ("FAIL".equals(status)) {
+            return base + " CPU 소켓을 지원하지 않습니다.";
+        }
+        return base + " 쿨러 소켓 지원 범위에 포함됩니다.";
     }
 
     private static String powerSummary(Map<String, Map<String, Object>> toolByName) {
+        return powerSummary(toolByName, toolStatus(toolByName, "power"));
+    }
+
+    private static String powerSummary(Map<String, Map<String, Object>> toolByName, String status) {
         Map<String, Object> result = toolByName.get("power");
         if (result == null) {
             return "GPU 소비전력과 PSU 정격 출력을 함께 확인합니다.";
@@ -359,29 +416,244 @@ public class BuildGraphService {
         Integer required = numberValue(details.get("requiredRatedCapacityW"));
         Integer capacity = numberValue(details.get("psuRatedCapacityW"));
         if (required != null && capacity != null) {
-            return "권장 " + required + "W / 현재 " + capacity + "W 기준으로 여유를 판단합니다.";
+            Integer headroom = capacity - required;
+            String base = "권장 출력 " + required + "W / 현재 파워 " + capacity + "W입니다.";
+            if ("FAIL".equals(status)) {
+                return base + " 권장 출력보다 파워 여유가 부족합니다.";
+            }
+            if ("WARN".equals(status)) {
+                return base + " 여유 " + Math.max(headroom, 0) + "W로 장착은 가능하지만 권장 여유가 낮습니다.";
+            }
+            return base + " 여유 " + Math.max(headroom, 0) + "W로 안정적인 편입니다.";
         }
         return toolSummary(toolByName, "power", "GPU 소비전력과 PSU 정격 출력을 함께 확인합니다.");
     }
 
-    private static String gpuLengthSummary(Map<String, Map<String, Object>> toolByName) {
+    private static String gpuLengthSummary(Map<String, Map<String, Object>> toolByName, String status) {
         Map<String, Object> details = objectMap(toolByName.getOrDefault("size", Map.of()).get("details"));
         Integer gpuLength = numberValue(details.get("gpuLengthMm"));
         Integer maxGpuLength = numberValue(details.get("maxGpuLengthMm"));
         if (gpuLength != null && maxGpuLength != null) {
-            return "GPU " + gpuLength + "mm / 케이스 허용 " + maxGpuLength + "mm를 비교합니다.";
+            int headroom = maxGpuLength - gpuLength;
+            String base = "GPU 길이 " + gpuLength + "mm / 케이스 허용 " + maxGpuLength + "mm입니다.";
+            if ("FAIL".equals(status)) {
+                return base + " 그래픽카드 길이가 케이스 허용 길이를 초과합니다.";
+            }
+            if ("WARN".equals(status)) {
+                return base + " 여유 " + Math.max(headroom, 0) + "mm로 장착은 가능하지만 간섭을 주의해야 합니다.";
+            }
+            return base + " 여유 " + headroom + "mm입니다.";
         }
         return "GPU 길이가 케이스 허용 길이 안에 있는지 확인합니다.";
     }
 
-    private static String coolerHeightSummary(Map<String, Map<String, Object>> toolByName) {
+    private static String coolerHeightSummary(Map<String, Map<String, Object>> toolByName, String status) {
         Map<String, Object> details = objectMap(toolByName.getOrDefault("size", Map.of()).get("details"));
         Integer coolerHeight = numberValue(details.get("coolerHeightMm"));
         Integer maxCoolerHeight = numberValue(details.get("maxCpuCoolerHeightMm"));
         if (coolerHeight != null && maxCoolerHeight != null) {
-            return "쿨러 " + coolerHeight + "mm / 케이스 허용 " + maxCoolerHeight + "mm를 비교합니다.";
+            int headroom = maxCoolerHeight - coolerHeight;
+            String base = "쿨러 높이 " + coolerHeight + "mm / 케이스 허용 " + maxCoolerHeight + "mm입니다.";
+            if ("FAIL".equals(status)) {
+                return base + " 쿨러 높이가 케이스 허용 높이를 초과합니다.";
+            }
+            if ("WARN".equals(status)) {
+                return base + " 여유 " + Math.max(headroom, 0) + "mm로 장착은 가능하지만 간섭을 주의해야 합니다.";
+            }
+            return base + " 여유 " + headroom + "mm입니다.";
         }
         return "CPU 쿨러 높이가 케이스 제한 안에 있는지 확인합니다.";
+    }
+
+    private static String socketLabel(String status) {
+        return "FAIL".equals(status) ? "소켓 불일치" : "소켓 일치";
+    }
+
+    private static String powerLabel(Map<String, Object> details, String status) {
+        if ("FAIL".equals(status)) {
+            return "파워 부족";
+        }
+        Integer headroom = powerHeadroom(details);
+        return headroom == null ? "전력 여유" : "전력 여유 " + Math.max(headroom, 0) + "W";
+    }
+
+    private static String gpuLengthLabel(Map<String, Object> details, String status) {
+        if ("FAIL".equals(status)) {
+            return "장착 불가";
+        }
+        if ("WARN".equals(status)) {
+            return "길이 간섭 주의";
+        }
+        Integer headroom = headroom(details, "gpuLengthMm", "maxGpuLengthMm");
+        return headroom == null ? "장착 길이" : "장착 여유 " + headroom + "mm";
+    }
+
+    private static String coolerHeightLabel(Map<String, Object> details, String status) {
+        if ("FAIL".equals(status)) {
+            return "높이 간섭";
+        }
+        if ("WARN".equals(status)) {
+            return "높이 간섭 주의";
+        }
+        Integer headroom = headroom(details, "coolerHeightMm", "maxCpuCoolerHeightMm");
+        return headroom == null ? "쿨러 높이" : "높이 여유 " + headroom + "mm";
+    }
+
+    private static String socketStatus(Map<String, ToolBuildPart> byCategory, Map<String, Object> details, String fallback) {
+        Boolean socketMatched = booleanValue(details.get("socketMatched"));
+        if (socketMatched != null) {
+            return socketMatched ? "PASS" : "FAIL";
+        }
+        String cpuSocket = attrValue(byCategory.get("CPU"), "socket");
+        String boardSocket = attrValue(byCategory.get("MOTHERBOARD"), "socket");
+        if (cpuSocket != null && boardSocket != null) {
+            return cpuSocket.equalsIgnoreCase(boardSocket) ? "PASS" : "FAIL";
+        }
+        return fallback;
+    }
+
+    private static String booleanStatus(Boolean passed, String fallback) {
+        return passed == null ? fallback : passed ? "PASS" : "FAIL";
+    }
+
+    private static String powerStatus(Map<String, Object> details, String fallback) {
+        Integer headroom = powerHeadroom(details);
+        if (headroom == null) {
+            return fallback;
+        }
+        if (headroom < 50) {
+            return "FAIL";
+        }
+        if (headroom < 150) {
+            return "WARN";
+        }
+        return "PASS";
+    }
+
+    private static String lengthStatus(Map<String, Object> details, String currentKey, String maxKey, String fallback) {
+        Integer headroom = headroom(details, currentKey, maxKey);
+        if (headroom == null) {
+            return fallback;
+        }
+        if (headroom < 0) {
+            return "FAIL";
+        }
+        if (headroom < 30) {
+            return "WARN";
+        }
+        return "PASS";
+    }
+
+    private static Integer powerHeadroom(Map<String, Object> details) {
+        Integer required = numberValue(details.get("requiredRatedCapacityW"));
+        Integer capacity = numberValue(details.get("psuRatedCapacityW"));
+        if (required != null && capacity != null) {
+            return capacity - required;
+        }
+        return numberValue(details.get("ratedHeadroomW"));
+    }
+
+    private static Integer headroom(Map<String, Object> details, String currentKey, String maxKey) {
+        Integer current = numberValue(details.get(currentKey));
+        Integer max = numberValue(details.get(maxKey));
+        if (current == null || max == null) {
+            return null;
+        }
+        return max - current;
+    }
+
+    private static Map<String, Object> toolDetails(Map<String, Map<String, Object>> toolByName, String tool) {
+        return objectMap(toolByName.getOrDefault(tool, Map.of()).get("details"));
+    }
+
+    private static String joinSpecs(String... specs) {
+        List<String> values = new ArrayList<>();
+        for (String spec : specs) {
+            addIfPresent(values, spec);
+        }
+        return String.join(" · ", values);
+    }
+
+    private static void addIfPresent(List<String> specs, String value) {
+        if (value != null && !value.isBlank() && !"미확인".equals(value)) {
+            specs.add(value);
+        }
+    }
+
+    private static String capacityDetail(ToolBuildPart part) {
+        Integer capacityGb = numberValue(part.attributes().get("capacityGb"));
+        return capacityGb == null ? null : formatStorageCapacity(capacityGb);
+    }
+
+    private static String storageCapacityDetail(ToolBuildPart part) {
+        Integer capacityGb = numberValue(part.attributes().get("capacityGb"));
+        return capacityGb == null ? null : formatStorageCapacity(capacityGb);
+    }
+
+    private static String moduleCountDetail(ToolBuildPart part) {
+        Integer moduleCount = numberValue(part.attributes().get("moduleCount"));
+        return moduleCount == null ? null : moduleCount + "개";
+    }
+
+    private static String wattageDetail(ToolBuildPart part) {
+        Integer wattage = firstAvailableNumber(part, "wattage", "tdpW");
+        return wattage == null ? null : wattage + "W";
+    }
+
+    private static String lengthDetail(ToolBuildPart part) {
+        Integer length = numberValue(part.attributes().get("lengthMm"));
+        return length == null ? null : "길이 " + length + "mm";
+    }
+
+    private static String psuCapacityDetail(ToolBuildPart part) {
+        Integer capacity = firstAvailableNumber(part, "capacityW", "ratedCapacityW");
+        return capacity == null ? null : "정격 " + capacity + "W";
+    }
+
+    private static String caseGpuLengthDetail(ToolBuildPart part) {
+        Integer maxGpuLength = numberValue(part.attributes().get("maxGpuLengthMm"));
+        return maxGpuLength == null ? null : "GPU 최대 " + maxGpuLength + "mm";
+    }
+
+    private static String coolerDetail(ToolBuildPart part) {
+        Integer height = firstAvailableNumber(part, "heightMm", "coolerHeightMm");
+        if (height != null) {
+            return "높이 " + height + "mm";
+        }
+        Object support = part.attributes().get("socketSupport");
+        if (support instanceof List<?> list && !list.isEmpty()) {
+            return String.valueOf(list.get(0)) + " 지원";
+        }
+        return null;
+    }
+
+    private static String storageInterfaceDetail(ToolBuildPart part) {
+        String value = firstText(attrValue(part, "interface"), attrValue(part, "formFactor"));
+        if (value == null) {
+            return null;
+        }
+        return value.toLowerCase(Locale.ROOT).contains("nvme") ? "NVMe" : value;
+    }
+
+    private static String formatStorageCapacity(int capacityGb) {
+        if (capacityGb >= 1024 && capacityGb % 1024 == 0) {
+            return (capacityGb / 1024) + "TB";
+        }
+        return capacityGb + "GB";
+    }
+
+    private static Integer firstAvailableNumber(ToolBuildPart part, String... keys) {
+        for (String key : keys) {
+            Integer value = numberValue(part.attributes().get(key));
+            if (value != null) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private static String fallbackPartDetail(ToolBuildPart part) {
+        return part.manufacturer() == null ? formatWon(firstNumber(part.price(), 0)) : part.manufacturer() + " · " + formatWon(firstNumber(part.price(), 0));
     }
 
     private static String priceSummary(Map<String, Map<String, Object>> toolByName, int budget, int total) {
@@ -416,8 +688,37 @@ public class BuildGraphService {
         if (part == null) {
             return "미확인";
         }
+        String value = attrValue(part, key);
+        return value == null ? "미확인" : value;
+    }
+
+    private static String attrValue(ToolBuildPart part, String key) {
+        if (part == null) {
+            return null;
+        }
         Object value = part.attributes().get(key);
-        return value == null ? "미확인" : String.valueOf(value);
+        return value == null ? null : String.valueOf(value);
+    }
+
+    private static boolean booleanAttr(ToolBuildPart part, String key) {
+        return Boolean.TRUE.equals(booleanValue(part == null ? null : part.attributes().get(key)));
+    }
+
+    private static Boolean booleanValue(Object value) {
+        if (value instanceof Boolean bool) {
+            return bool;
+        }
+        if (value == null) {
+            return null;
+        }
+        String normalized = value.toString().trim().toLowerCase(Locale.ROOT);
+        if ("true".equals(normalized) || "yes".equals(normalized) || "1".equals(normalized)) {
+            return true;
+        }
+        if ("false".equals(normalized) || "no".equals(normalized) || "0".equals(normalized)) {
+            return false;
+        }
+        return null;
     }
 
     private static int total(List<ToolBuildPart> parts) {

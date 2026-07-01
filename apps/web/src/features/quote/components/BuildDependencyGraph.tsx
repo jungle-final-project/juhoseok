@@ -144,7 +144,7 @@ export function BuildDependencyGraph({
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2 text-xs font-black">
                       {statusIcon(insight.status)}
-                      {insight.status}
+                      {statusLabel(insight.status)}
                     </div>
                     <span className="text-[11px] font-black text-slate-400">{insight.relatedNodeIds.length} nodes</span>
                   </div>
@@ -227,7 +227,7 @@ function nodeLabel(node: BuildGraphResolveResponse['nodes'][number]) {
     <div className="min-w-[124px] max-w-[172px]">
       <div className="mb-1 flex items-center justify-between gap-2">
         <span className="truncate text-[11px] font-black text-slate-500">{category ?? node.type}</span>
-        <span className={`rounded px-1.5 py-0.5 text-[10px] font-black ${statusBadgeTone(node.status)}`}>{node.status}</span>
+        <span className={`rounded px-1.5 py-0.5 text-[10px] font-black ${statusBadgeTone(node.status)}`}>{statusLabel(node.status)}</span>
       </div>
       <div className="line-clamp-2 text-xs font-black leading-4 text-commerce-ink">{node.label}</div>
       {node.detail ? <div className="mt-1 line-clamp-2 text-[10px] leading-4 text-slate-500">{node.detail}</div> : null}
@@ -289,6 +289,12 @@ function statusBadgeTone(status: BuildGraphStatus) {
   if (status === 'FAIL') return 'bg-red-100 text-red-700';
   if (status === 'WARN') return 'bg-amber-100 text-amber-700';
   return 'bg-emerald-50 text-emerald-700';
+}
+
+function statusLabel(status: BuildGraphStatus) {
+  if (status === 'FAIL') return '장착 불가';
+  if (status === 'WARN') return '간섭 주의';
+  return '여유 있음';
 }
 
 function isPartCategory(value: string): value is PartCategory {
