@@ -1,5 +1,53 @@
 import { expect, test } from '@playwright/test';
 
+const checkoutDraft = {
+  id: 'draft-checkout-test',
+  status: 'ACTIVE',
+  name: '셀프 견적',
+  items: [
+    {
+      id: 'draft-item-checkout-gpu',
+      partId: 'part-checkout-gpu',
+      category: 'GPU',
+      name: 'RTX 5070 구매 테스트',
+      manufacturer: 'NVIDIA',
+      quantity: 1,
+      unitPriceAtAdd: 980000,
+      currentPrice: 980000,
+      lineTotal: 980000,
+      attributes: {},
+      externalOffer: {
+        imageUrl: 'https://example.test/checkout-gpu.png',
+        supplierName: '그래픽테스트몰',
+        offerUrl: 'https://example.test/checkout-gpu',
+        lowPrice: 980000,
+        source: 'NAVER_SHOPPING_SEARCH'
+      }
+    },
+    {
+      id: 'draft-item-checkout-cpu',
+      partId: 'part-checkout-cpu',
+      category: 'CPU',
+      name: 'Ryzen 7 구매 테스트',
+      manufacturer: 'AMD',
+      quantity: 1,
+      unitPriceAtAdd: 420000,
+      currentPrice: 420000,
+      lineTotal: 420000,
+      attributes: {},
+      externalOffer: {
+        imageUrl: 'https://example.test/checkout-cpu.png',
+        supplierName: '구매처 미확인',
+        offerUrl: null,
+        lowPrice: 420000,
+        source: 'MANUAL_CURRENT_LINEUP'
+      }
+    }
+  ],
+  totalPrice: 1400000,
+  itemCount: 2
+};
+
 test('filters internal assets by sidebar category on self quote page', async ({ page }) => {
   const requestedCategories: string[] = [];
   const emptyDraft = {
@@ -164,6 +212,129 @@ test('filters internal assets by sidebar category on self quote page', async ({ 
 
   await page.getByRole('button', { name: 'RTX 4070 SUPER 테스트 견적에서 제거' }).click();
   await expect(page.getByText('왼쪽 목록에서 부품을 담으면 이곳에 내 견적이 쌓입니다.')).toBeVisible();
+});
+
+test('opens checkout from self quote purchase CTA without using the build result route', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('buildgraph.token', 'jwt-user-token');
+  });
+
+  await page.route('**/api/quote-drafts/current**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(checkoutDraft)
+    });
+  });
+
+  await page.route('**/api/parts**', async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname.includes('/price-history')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          partId: 'part-checkout-gpu',
+          partName: 'RTX 5070 구매 테스트',
+          currentPrice: 980000,
+          days: 3650,
+          source: 'NAVER_SHOPPING_SEARCH',
+          items: [],
+          summary: {
+            sampleCount: 0,
+            currentPrice: 980000,
+            minPrice: 980000,
+            maxPrice: 980000,
+            firstPrice: 980000,
+            lastPrice: 980000,
+            changeAmount: 0,
+            changeRatePercent: 0
+          }
+        })
+      });
+      return;
+    }
+
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ items: [], page: 0, size: 20, total: 0 })
+    });
+  });
+
+  await page.goto('/self-quote');
+
+  const purchaseLink = page.getByRole('link', { name: '구매하기' });
+  await expect(purchaseLink).toHaveAttribute('href', '/checkout');
+  await purchaseLink.click();
+
+  await expect(page).toHaveURL('/checkout');
+  await expect(page).not.toHaveURL(/\/builds\/00000000-0000-4000-8000-000000002001/);
+});
+
+test('renders checkout from current quote draft and completes demo payment snapshot', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('buildgraph.token', 'jwt-user-token');
+    sessionStorage.clear();
+  });
+
+  await page.route('**/api/quote-drafts/current**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(checkoutDraft)
+    });
+  });
+
+  await page.goto('/checkout');
+
+  await expect(page.getByRole('heading', { name: '구매 전 확인' })).toBeVisible();
+  await expect(page.getByText('주문 부품 2개')).toBeVisible();
+  await expect(page.getByText('RTX 5070 구매 테스트')).toBeVisible();
+  await expect(page.getByText('Ryzen 7 구매 테스트')).toBeVisible();
+  await expect(page.getByText('1,400,000원').first()).toBeVisible();
+  await expect(page.getByRole('link', { name: 'RTX 5070 구매 테스트 구매처 이동' })).toHaveAttribute('href', 'https://example.test/checkout-gpu');
+  await expect(page.getByRole('button', { name: 'Ryzen 7 구매 테스트 구매처 정보 없음' })).toBeDisabled();
+
+  await page.getByRole('button', { name: '1,400,000원 데모 결제하기' }).click();
+
+  await expect(page).toHaveURL('/checkout/complete');
+  await expect(page.getByRole('heading', { name: '데모 결제 완료' })).toBeVisible();
+  await expect(page.getByText('RTX 5070 구매 테스트')).toBeVisible();
+  await expect(page.getByText('Ryzen 7 구매 테스트')).toBeVisible();
+  await expect(page.getByText(/BG-\d{8}-/).first()).toBeVisible();
+  await expect(page.getByRole('link', { name: '구매처 링크 다시 확인' })).toHaveAttribute('href', '/checkout');
+});
+
+test('shows checkout empty state and keeps mobile layout within viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => {
+    localStorage.setItem('buildgraph.token', 'jwt-user-token');
+    sessionStorage.clear();
+  });
+
+  await page.route('**/api/quote-drafts/current**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        id: 'draft-empty-checkout',
+        status: 'EMPTY',
+        name: '셀프 견적',
+        items: [],
+        totalPrice: 0,
+        itemCount: 0
+      })
+    });
+  });
+
+  await page.goto('/checkout');
+
+  await expect(page.getByRole('heading', { name: '구매할 부품이 없습니다' })).toBeVisible();
+  await expect(page.getByRole('link', { name: '셀프 견적으로 돌아가기' })).toHaveAttribute('href', '/self-quote');
+
+  const hasBodyOverflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
+  expect(hasBodyOverflow).toBe(false);
 });
 
 test('self quote chatbot sends current draft and applies a remove action after confirmation', async ({ page }) => {

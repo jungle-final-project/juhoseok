@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Bell, CheckCircle2, PackageCheck, Search, ShoppingCart, SlidersHorizontal, X } from 'lucide-react';
+import { Bell, CheckCircle2, PackageCheck, Search, ShoppingCart, SlidersHorizontal, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { CategorySidebar, DataTable, MetricCard, Panel, Screen } from '../../../components/ui';
@@ -326,10 +326,17 @@ export function SelfQuotePage() {
                   <PackageCheck size={17} />
                   Tool 검증하기
                 </button>
-                <Link to="/builds/00000000-0000-4000-8000-000000002001" className="flex min-h-11 items-center justify-center gap-2 rounded-md border border-commerce-line bg-white px-4 py-3 text-center text-sm font-black text-commerce-ink hover:border-commerce-ink">
-                  <AlertTriangle size={17} className="text-commerce-amber" />
-                  구매하기
-                </Link>
+                {draftItems.length > 0 ? (
+                  <Link to="/checkout" className="flex min-h-11 items-center justify-center gap-2 rounded-md border border-commerce-line bg-white px-4 py-3 text-center text-sm font-black text-commerce-ink hover:border-commerce-ink">
+                    <ShoppingCart size={17} className="text-commerce-amber" />
+                    구매하기
+                  </Link>
+                ) : (
+                  <button type="button" disabled className="flex w-full min-h-11 cursor-not-allowed items-center justify-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-center text-sm font-black text-slate-300">
+                    <ShoppingCart size={17} />
+                    구매하기
+                  </button>
+                )}
               </div>
             </Panel>
           </aside>

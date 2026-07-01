@@ -12,7 +12,7 @@
 - 내부 DB `BIGINT id`는 frontend에 노출하지 않는다.
 - Auth 기능 owner와 Auth 공통/관리자 권한 owner는 분리한다.
 - AdminShell owner와 각 admin page 내부 owner는 분리한다.
-- 주문, 결제, 배송, 재고 차감, 타임세일은 V1 route/API에 포함하지 않는다.
+- 실제 주문, 결제, 배송, 재고 차감, 타임세일은 V1 route/API에 포함하지 않는다. 프론트 데모 checkout route는 서버 주문/결제 상태를 만들지 않는다.
 - 직접 Tool check는 `tool_invocations`에 저장하지 않는다. Agent/recommend 내부 Tool 호출만 저장한다.
 - 관리자 API는 `ADMIN` 권한 필요 여부를 명확히 유지한다.
 
@@ -23,7 +23,7 @@ MVP 기준 결정값:
 - 세 문서의 API path, enum/status, owner, DB table, `public_id` 규칙은 기능 구현 전에 동결한다.
 - path의 `{id}`와 route param의 `:buildId`, `:ticketId`, `:agentSessionId`는 모두 `public_id` 문자열이다.
 - 내부 DB `BIGINT id`는 public API, route, frontend DTO, audit log `target_id`에 노출하지 않는다.
-- `products`, 주문, 결제, 배송, 재고 차감, 타임세일 도메인은 V1에서 추가하지 않는다.
+- `products`, 실제 주문, 결제, 배송, 재고 차감, 타임세일 도메인은 V1에서 추가하지 않는다.
 - owner 변경, API path 변경, enum/status 변경, table 추가/삭제는 이 문서, `DB_SCHEMA.md`, `API_CONTRACT.md`를 같은 PR에서 동시에 수정해야 한다.
 - 병렬 개발 중 임시 필드가 필요하면 public DTO에 노출하지 말고 feature 내부 mock이나 테스트 fixture로만 둔다.
 
@@ -142,6 +142,8 @@ Auth 화면과 Auth/User API 구현 주 owner는 1번이다. 5번은 `apps/web/s
 | `/builds/:buildId/change-part` | 1번 | 2번 | `POST /api/builds/{id}/change-part`, `GET /api/parts` |
 | `/my/quotes` | 1번 | 2번 | `GET /api/builds/history`, `GET /api/price-alerts`, `POST /api/price-alerts` |
 | `/self-quote` | 2번 | 1번, 5번 | `GET /api/parts`, `GET /api/parts/{id}/price-history`, `GET /api/quote-drafts/current`, `PUT /api/quote-drafts/current/apply-ai-build`, `PUT/PATCH/DELETE /api/quote-drafts/current/items/{partId}`, 5개 Tool API |
+| `/checkout` | 2번 | 1번, 5번 | `GET /api/quote-drafts/current` |
+| `/checkout/complete` | 2번 | 1번, 5번 | 프론트 `sessionStorage` 데모 상태 |
 | `/parts/:partId` | 2번 | 5번 | `GET /api/parts/{id}`, `PUT /api/quote-drafts/current/items/{partId}` |
 | `/login` | 1번 | 5번 | `POST /api/auth/login`, `GET /api/auth/google/start` |
 | `/signup` | 1번 | 5번 | `POST /api/users` |
@@ -298,7 +300,7 @@ checked:
 
 - 다른 담당자 feature 폴더를 임의로 리팩터링하지 않는다.
 - `products` 도메인 파일/문서를 추가하지 않는다.
-- 주문, 결제, 배송, 재고 차감, 타임세일 관련 API/route/table을 V1에 추가하지 않는다.
+- 실제 주문, 결제, 배송, 재고 차감, 타임세일 관련 API/route/table을 V1에 추가하지 않는다.
 - public route/API에서 내부 `BIGINT id`를 노출하지 않는다.
 - AWS 공용 DB에서 직접 DDL을 수정하지 않는다.
 
